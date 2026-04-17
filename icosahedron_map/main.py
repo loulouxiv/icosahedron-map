@@ -193,7 +193,7 @@ def main():
     if args.pdf:
         svg_string = svg_gen.get_svg_string()
         svg_to_pdf(svg_string, output_path, landscape=True, oblique=args.oblique,
-                   no_margin=args.no_margin)
+                   no_margin=args.no_margin, unfolder=unfolder)
     else:
         svg_gen.save()
 

@@ -119,7 +119,7 @@ def _find_optimal_angle(page_w: float, page_h: float) -> tuple:
 
 
 def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
-                     scale: float = 1.0) -> str:
+                     scale: float = 1.0, unfolder: IcosahedronUnfolder = None) -> str:
     """
     Apply rotation and scale transform to SVG content and adjust viewBox.
 
@@ -128,6 +128,7 @@ def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
         angle: Rotation angle in degrees
         width, height: Original content dimensions
         scale: Scale factor to apply
+        unfolder: Optional IcosahedronUnfolder for accurate vertex-based rotation bounds
 
     Returns:
         Modified SVG string with rotation and scale applied
@@ -139,8 +140,18 @@ def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
     cos_t, sin_t = math.cos(theta), math.sin(theta)
 
     # Calculate new bounding box dimensions after rotation and scale
-    rot_width = abs(width * cos_t) + abs(height * sin_t)
-    rot_height = abs(width * sin_t) + abs(height * cos_t)
+    # Use actual net vertices for accurate bounds, not viewBox rectangle
+    if unfolder is not None:
+        all_verts = []
+        for face_idx in range(20):
+            all_verts.extend(unfolder.get_triangle_vertices(face_idx))
+        vertices = np.array(all_verts)
+        rot_width, rot_height = _get_rotated_bounds(vertices, angle)
+    else:
+        # Fallback to rectangle-based calculation if unfolder not available
+        rot_width = abs(width * cos_t) + abs(height * sin_t)
+        rot_height = abs(width * sin_t) + abs(height * cos_t)
+
     new_width = rot_width / scale
     new_height = rot_height / scale
 
@@ -178,7 +189,8 @@ def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
 
 
 def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
-               oblique: bool = False, no_margin: bool = False) -> None:
+               oblique: bool = False, no_margin: bool = False,
+               unfolder: IcosahedronUnfolder = None) -> None:
     """
     Convert SVG string to A4 PDF.
 
@@ -188,6 +200,7 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
         landscape: If True, use landscape orientation (default for wide patterns)
         oblique: If True, rotate content to maximize size on page
         no_margin: If True, remove margins for tight bounding box
+        unfolder: Optional IcosahedronUnfolder instance for accurate rotation bounds
     """
     if landscape:
         page_width = A4_HEIGHT_PT  # 297mm in points
@@ -199,14 +212,6 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
         page_height = A4_HEIGHT_PT
         page_w_mm = A4_WIDTH_MM
         page_h_mm = A4_HEIGHT_MM
-
-    if no_margin:
-        # Recompute viewBox from tight bounding box
-        min_x, min_y, width, height = _get_tight_bounds(svg_string)
-        new_viewbox = f"{min_x} {min_y} {width} {height}"
-        svg_string = re.sub(r'viewBox="[^"]+"', f'viewBox="{new_viewbox}"', svg_string)
-        svg_string = re.sub(r'width="[^"]+"', f'width="{width}px"', svg_string)
-        svg_string = re.sub(r'height="[^"]+"', f'height="{height}px"', svg_string)
 
     if oblique:
         # Get content dimensions from SVG
@@ -220,7 +225,15 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
             print(f"   Rotating {angle:.1f}° for {improvement:.1f}% larger output")
 
             # Apply rotation and scale
-            svg_string = _apply_rotation(svg_string, angle, width, height, rel_scale)
+            svg_string = _apply_rotation(svg_string, angle, width, height, rel_scale, unfolder)
+
+    if no_margin:
+        # Recompute viewBox from tight bounding box
+        min_x, min_y, width, height = _get_tight_bounds(svg_string)
+        new_viewbox = f"{min_x} {min_y} {width} {height}"
+        svg_string = re.sub(r'viewBox="[^"]+"', f'viewBox="{new_viewbox}"', svg_string)
+        svg_string = re.sub(r'width="[^"]+"', f'width="{width}px"', svg_string)
+        svg_string = re.sub(r'height="[^"]+"', f'height="{height}px"', svg_string)
 
     # Convert SVG to PDF, scaling to fit A4
     cairosvg.svg2pdf(
