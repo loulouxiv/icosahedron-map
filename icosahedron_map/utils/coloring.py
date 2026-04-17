@@ -10,14 +10,14 @@ from typing import Dict, List
 
 # Contrasting color palette (colorblind-friendly)
 DEFAULT_COLORS = [
-    "#e6194B",  # Red
-    "#3cb44b",  # Green
-    "#ffe119",  # Yellow
-    "#4363d8",  # Blue
-    "#f58231",  # Orange
-    "#911eb4",  # Purple
-    "#42d4f4",  # Cyan
-    "#f032e6",  # Magenta
+    "#ed6b75",  # Red
+    "#5cbd6b",  # Green
+    "#f5d44a",  # Yellow
+    "#6080e0",  # Blue
+    "#f5952a",  # Orange
+    "#a840c8",  # Purple
+    "#50d8f8",  # Cyan
+    "#f050e8",  # Magenta
 ]
 
 
