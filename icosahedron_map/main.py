@@ -17,11 +17,12 @@ from .utils.clipping import SphericalClipper
 from .utils.coloring import assign_country_colors
 from .rendering.graticule import GraticuleGenerator
 from .rendering.svg_generator import IcosahedronSVGGenerator
+from .rendering.pdf_generator import svg_to_pdf
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate an icosahedron map pattern in SVG format"
+        description="Generate an icosahedron map pattern in SVG or A4 PDF format"
     )
     parser.add_argument(
         '-r', '--resolution',
@@ -71,6 +72,11 @@ def main():
         '--color-countries',
         action='store_true',
         help="Colorize countries with contrasting colors"
+    )
+    parser.add_argument(
+        '--pdf',
+        action='store_true',
+        help="Output A4 PDF instead of SVG (landscape orientation)"
     )
 
     args = parser.parse_args()
@@ -124,9 +130,26 @@ def main():
             print(f"   Warning: Could not load countries: {e}")
             print("   Continuing without country data...")
 
-    # 7. Generate SVG
-    print("7. Generating SVG...")
-    svg_gen = IcosahedronSVGGenerator(unfolder, face_projections, args.output,
+    # 7. Generate SVG (or PDF)
+    output_format = "PDF" if args.pdf else "SVG"
+    print(f"7. Generating {output_format}...")
+
+    # Determine output path
+    if args.pdf:
+        if args.output == 'icosahedron_map.svg':
+            output_path = 'icosahedron_map.pdf'
+        elif args.output.lower().endswith('.svg'):
+            output_path = args.output[:-4] + '.pdf'
+        elif args.output.lower().endswith('.pdf'):
+            output_path = args.output
+        else:
+            output_path = args.output + '.pdf'
+        svg_output = None  # Will use in-memory SVG
+    else:
+        output_path = args.output
+        svg_output = args.output
+
+    svg_gen = IcosahedronSVGGenerator(unfolder, face_projections, svg_output or "temp.svg",
                                        country_colors=country_colors)
 
     # Draw background (ocean)
@@ -157,9 +180,13 @@ def main():
         svg_gen.add_face_labels()
 
     # Save
-    svg_gen.save()
+    if args.pdf:
+        svg_string = svg_gen.get_svg_string()
+        svg_to_pdf(svg_string, output_path, landscape=True)
+    else:
+        svg_gen.save()
 
-    print(f"\n=== Done! Output: {args.output} ===")
+    print(f"\n=== Done! Output: {output_path} ===")
 
 
 if __name__ == "__main__":
