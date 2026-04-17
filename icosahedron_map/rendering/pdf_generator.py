@@ -30,16 +30,23 @@ def _parse_svg_dimensions(svg_string: str) -> tuple:
 
 
 def _get_rotated_bounds(vertices: np.ndarray, angle_deg: float) -> tuple:
-    """Get bounding box dimensions after rotating vertices."""
+    """Get bounding box after rotating vertices.
+
+    Returns:
+        (min_x, min_y, width, height) of rotated bounding box
+    """
     theta = math.radians(angle_deg)
     cos_t, sin_t = math.cos(theta), math.sin(theta)
 
     rotated_x = vertices[:, 0] * cos_t - vertices[:, 1] * sin_t
     rotated_y = vertices[:, 0] * sin_t + vertices[:, 1] * cos_t
 
-    width = rotated_x.max() - rotated_x.min()
-    height = rotated_y.max() - rotated_y.min()
-    return width, height
+    min_x = rotated_x.min()
+    max_x = rotated_x.max()
+    min_y = rotated_y.min()
+    max_y = rotated_y.max()
+
+    return min_x, min_y, max_x - min_x, max_y - min_y
 
 
 def _get_tight_bounds(svg_string: str) -> tuple:
@@ -99,7 +106,7 @@ def _find_optimal_angle(page_w: float, page_h: float) -> tuple:
     vertices = np.array(all_verts)
 
     # Horizontal placement
-    w0, h0 = _get_rotated_bounds(vertices, 0)
+    _, _, w0, h0 = _get_rotated_bounds(vertices, 0)
     horiz_scale = min(page_w / w0, page_h / h0)
 
     best_angle = 0
@@ -108,7 +115,7 @@ def _find_optimal_angle(page_w: float, page_h: float) -> tuple:
     # Search angles from 0 to 45 degrees
     for angle_deg in range(0, 451):
         angle = angle_deg / 10.0
-        w, h = _get_rotated_bounds(vertices, angle)
+        _, _, w, h = _get_rotated_bounds(vertices, angle)
         scale = min(page_w / w, page_h / h)
 
         if scale > best_scale:
@@ -139,6 +146,11 @@ def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
     theta = math.radians(angle)
     cos_t, sin_t = math.cos(theta), math.sin(theta)
 
+    # Parse original viewBox to get center for rotation
+    min_x, min_y, orig_w, orig_h = _parse_svg_dimensions(svg_string)
+    cx = min_x + orig_w / 2
+    cy = min_y + orig_h / 2
+
     # Calculate new bounding box dimensions after rotation and scale
     # Use actual net vertices for accurate bounds, not viewBox rectangle
     if unfolder is not None:
@@ -146,27 +158,22 @@ def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
         for face_idx in range(20):
             all_verts.extend(unfolder.get_triangle_vertices(face_idx))
         vertices = np.array(all_verts)
-        rot_width, rot_height = _get_rotated_bounds(vertices, angle)
+        rot_min_x, rot_min_y, rot_width, rot_height = _get_rotated_bounds(vertices, angle)
+        # Scale the rotated bounds
+        new_width = rot_width / scale
+        new_height = rot_height / scale
+        new_min_x = rot_min_x / scale
+        new_min_y = rot_min_y / scale
     else:
         # Fallback to rectangle-based calculation if unfolder not available
         rot_width = abs(width * cos_t) + abs(height * sin_t)
         rot_height = abs(width * sin_t) + abs(height * cos_t)
+        new_width = rot_width / scale
+        new_height = rot_height / scale
+        new_min_x = cx - new_width / 2
+        new_min_y = cy - new_height / 2
 
-    new_width = rot_width / scale
-    new_height = rot_height / scale
-
-    # Parse original viewBox
-    min_x, min_y, orig_w, orig_h = _parse_svg_dimensions(svg_string)
-
-    # Center of original content
-    cx = min_x + orig_w / 2
-    cy = min_y + orig_h / 2
-
-    # New viewBox centered on rotated/scaled content
-    new_min_x = cx - new_width / 2
-    new_min_y = cy - new_height / 2
-
-    # Create transform: rotate around center
+    # Create transform: rotate around center of original content
     transform = f"rotate({angle} {cx} {cy})"
 
     # Update viewBox (smaller viewBox = larger content on page)
