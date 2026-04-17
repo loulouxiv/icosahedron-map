@@ -1,0 +1,1017 @@
+
+╭─── Claude Code v2.0.76 ──────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back Louis!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                     * ▐▛███▜▌ *                    │ ─────────────────────── │
+│                    * ▝▜█████▛▘ *                   │ Recent activity         │
+│                     *  ▘▘ ▝▝  *                    │ No recent activity      │
+│                                                    │                         │
+│  Opus 4.5 · Claude Pro · llevequedev@gmail.com's   │                         │
+│  Organization                                      │                         │
+│                    ~/second_try                    │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+> /clear 
+  ⎿  (no content)
+
+> /context 
+  ⎿  
+      Context Usage
+     ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛀ ⛀   claude-opus-4-5-20251101 · 63k/200k tokens (31%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ 
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ System prompt: 2.9k tokens (1.4%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ System tools: 14.8k tokens (7.4%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ Memory files: 40 tokens (0.0%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ Messages: 91 tokens (0.0%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛶ Free space: 137k (68.6%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛝ ⛝ ⛝   ⛝ Autocompact buffer: 45.0k tokens (22.5%)
+     ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ 
+     ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ ⛝ 
+     
+     Memory files · /memory
+     └ ~/.claude/CLAUDE.md: 40 tokens
+     
+     Skills and slash commands · /skills
+     
+     
+
+> add option to output an A4 PDF instead of SVG 
+
+● Explore(Explore codebase structure)
+  ⎿  Done (17 tool uses · 37.9k tokens · 41s)                              
+
+● Let me read the relevant files to understand the current implementation:
+
+● Read(icosahedron_map/main.py)
+  ⎿  Read 167 lines
+
+● Read(icosahedron_map/rendering/svg_generator.py)
+  ⎿  Read 267 lines
+
+● Read(requirements.txt)
+  ⎿  Read 8 lines
+
+● Update(requirements.txt)
+  ⎿  Added 1 line                                                        
+      5  numpy>=1.24.0
+      6  requests>=2.31.0
+      7  scipy>=1.11.0
+      8 +cairosvg>=2.7.0                                                 
+
+● Write(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Wrote 56 lines to icosahedron_map/rendering/pdf_generator.py
+      1 """
+      2 PDF generator for the icosahedron map pattern.
+      3 Converts SVG output to A4 PDF format using cairosvg.
+      4 """
+      5 import cairosvg
+      6 # A4 dimensions in points (72 points per inch)
+      7 A4_WIDTH_PT = 595.28  # 210mm
+     … +46 lines (ctrl+o to expand)
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 1 line                                                        
+      17  from .utils.coloring import assign_country_colors
+      18  from .rendering.graticule import GraticuleGenerator
+      19  from .rendering.svg_generator import IcosahedronSVGGenerator
+      20 +from .rendering.pdf_generator import svg_to_pdf                
+      21  
+      22  
+      23  def main():
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 5 lines                                                       
+      73          action='store_true',
+      74          help="Colorize countries with contrasting colors"
+      75      )
+      76 +    parser.add_argument(                                       
+      77 +        '--pdf',                                               
+      78 +        action='store_true',                                   
+      79 +        help="Output A4 PDF instead of SVG (landscape orientati
+         +on)"                                                           
+      80 +    )                                                          
+      81  
+      82      args = parser.parse_args()
+      83  
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 18 lines, removed 3 lines                                     
+      130              print(f"   Warning: Could not load countries: {e}"
+           )
+      131              print("   Continuing without country data...")
+      132  
+      133 -    # 7. Generate SVG                                         
+      134 -    print("7. Generating SVG...")                             
+      135 -    svg_gen = IcosahedronSVGGenerator(unfolder, face_projectio
+          -ns, args.output,                                              
+      133 +    # 7. Generate SVG (or PDF)                                
+      134 +    output_format = "PDF" if args.pdf else "SVG"              
+      135 +    print(f"7. Generating {output_format}...")                
+      136 +                                                              
+      137 +    # Determine output path                                   
+      138 +    if args.pdf:                                              
+      139 +        if args.output == 'icosahedron_map.svg':              
+      140 +            output_path = 'icosahedron_map.pdf'               
+      141 +        elif args.output.lower().endswith('.svg'):            
+      142 +            output_path = args.output[:-4] + '.pdf'           
+      143 +        else:                                                 
+      144 +            output_path = args.output + '.pdf'                
+      145 +        svg_output = None  # Will use in-memory SVG           
+      146 +    else:                                                     
+      147 +        output_path = args.output                             
+      148 +        svg_output = args.output                              
+      149 +                                                              
+      150 +    svg_gen = IcosahedronSVGGenerator(unfolder, face_projectio
+          +ns, svg_output or "temp.svg",                                 
+      151                                         country_colors=country_
+           colors)
+      152  
+      153      # Draw background (ocean)
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 6 lines, removed 2 lines                                      
+      178          svg_gen.add_face_labels()
+      179  
+      180      # Save
+      181 -    svg_gen.save()                                            
+      181 +    if args.pdf:                                              
+      182 +        svg_string = svg_gen.get_svg_string()                 
+      183 +        svg_to_pdf(svg_string, output_path, landscape=True)   
+      184 +    else:                                                     
+      185 +        svg_gen.save()                                        
+      186  
+      183 -    print(f"\n=== Done! Output: {args.output} ===")           
+      187 +    print(f"\n=== Done! Output: {output_path} ===")           
+      188  
+      189  
+      190  if __name__ == "__main__":
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 1 line, removed 1 line                                        
+      22  
+      23  def main():
+      24      parser = argparse.ArgumentParser(
+      25 -        description="Generate an icosahedron map pattern in SVG
+         - format"                                                       
+      25 +        description="Generate an icosahedron map pattern in SVG
+         + or A4 PDF format"                                             
+      26      )
+      27      parser.add_argument(
+      28          '-r', '--resolution',
+
+● Bash(pip install cairosvg 2>&1 | tail -5)
+  ⎿     See /usr/share/doc/python3.12/README.venv for more information.    
+
+    note: If you believe this is a mistake, please contact your Python inst
+    … +4 lines (ctrl+o to expand)
+
+
+● Bash(ls -la /home/exedev/second_try/ | grep -E "venv|env")
+  ⎿  drwxr-xr-x  5 exedev exedev    4096 Apr 16 22:56 venv
+
+● Bash(source /home/exedev/second_try/venv/bin/activate && pip install cairosvg
+      2>&1 | tail -5)
+  ⎿ Downloading webencodings-0.5.1-py2.py3-none-any.whl (11 kB)            
+    Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.2/48.2 kB 4.0 MB/s eta 0
+    … +6 lines (ctrl+o to expand)
+
+
+● Bash(source venv/bin/activate && python -m icosahedron_map --pdf -r 110m -o
+      test_pdf_output.pdf 2>&1)
+  ⎿  === Icosahedron Map Generator ===  
+
+     1. Building icosahedron geometry...
+     … +16 lines (ctrl+o to expand)
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 2 lines                                                       
+      140              output_path = 'icosahedron_map.pdf'
+      141          elif args.output.lower().endswith('.svg'):
+      142              output_path = args.output[:-4] + '.pdf'
+      143 +        elif args.output.lower().endswith('.pdf'):            
+      144 +            output_path = args.output                         
+      145          else:
+      146              output_path = args.output + '.pdf'
+      147          svg_output = None  # Will use in-memory SVG
+
+● Bash(source venv/bin/activate && python -m icosahedron_map --pdf -r 110m -o
+      test_a4.pdf 2>&1)
+  ⎿  === Icosahedron Map Generator ===  
+
+     1. Building icosahedron geometry...
+     … +16 lines (ctrl+o to expand)
+
+● Bash(ls -la /home/exedev/second_try/test_a4.pdf)
+  ⎿ -rw-r--r-- 1 exedev exedev 119836 Apr 17 13:54 /home/exedev/second_try/
+    test_a4.pdf
+
+
+● Bash(rm /home/exedev/second_try/test_pdf_output.pdf.pdf
+      /home/exedev/second_try/test_a4.pdf 2>/dev/null; echo "Cleaned up test
+      files")
+  ⎿  Cleaned up test files
+
+● Done! I've added A4 PDF output support. Here's what was changed:
+
+  Files modified:
+  - requirements.txt - Added cairosvg>=2.7.0 dependency
+  - icosahedron_map/main.py - Added --pdf CLI flag and PDF generation logic
+  - icosahedron_map/rendering/pdf_generator.py - New module for SVG to A4 PDF conversion
+
+  Usage:
+  # Generate A4 PDF (landscape orientation)
+  python -m icosahedron_map --pdf -o map.pdf
+
+  # Or just use --pdf with default filename
+  python -m icosahedron_map --pdf
+
+  # All other options still work
+  python -m icosahedron_map --pdf -r 10m --color-countries
+
+  The PDF is generated in landscape orientation (297mm × 210mm) which fits the wide icosahedron net pattern well.
+
+> commit 
+
+● Bash(git status)
+  ⎿  On branch main                                              
+     Changes not staged for commit:
+       (use "git add <file>..." to update what will be committed)
+     … +10 lines (ctrl+o to expand)
+
+● Bash(git diff)
+  ⎿  diff --git a/icosahedron_map/main.py b/icosahedron_map/main.py
+     index b668fd5..7ba578f 100644
+     --- a/icosahedron_map/main.py
+     … +86 lines (ctrl+o to expand)
+
+● Bash(git log --oneline -5 2>/dev/null || echo "No commits yet")
+  ⎿  92ff358 Add --color-countries option for contrasting country colors 
+     442e143 Add README with usage instructions and architecture overview
+     d7ffd12 Icosahedron map generator - unfoldable globe projection
+
+● Bash(git add icosahedron_map/main.py requirements.txt
+      icosahedron_map/rendering/pdf_generator.py)
+  ⎿  (No content)
+
+● Bash(git commit -m "Add --pdf option for A4 PDF output…)
+  ⎿  [main e9eb6c9] Add --pdf option for A4 PDF output              
+      Committer: exe.dev user <exedev@green-blue.exe.xyz>
+     Your name and email address were configured automatically based
+     … +12 lines (ctrl+o to expand)
+
+● Committed e9eb6c9 - Add --pdf option for A4 PDF output
+
+  3 files changed:
+  - icosahedron_map/main.py - Added --pdf flag and PDF generation logic
+  - icosahedron_map/rendering/pdf_generator.py - New PDF conversion module
+  - requirements.txt - Added cairosvg dependency
+
+> explain resolution parameter 
+
+● Read(icosahedron_map/data/downloader.py)
+  ⎿  Read 106 lines
+
+● The -r/--resolution parameter controls the detail level of country boundary data from https://www.naturalearthdata.com/:
+
+  | Value | Detail           | File Size | Use Case                      |
+  |-------|------------------|-----------|-------------------------------|
+  | 110m  | Low              | ~800KB    | Quick previews, small prints  |
+  | 50m   | Medium (default) | ~5MB      | General use, good balance     |
+  | 10m   | High             | ~60MB     | Large prints, fine coastlines |
+
+  The number refers to map scale (1:110 million, 1:50 million, 1:10 million). Higher resolution means more polygon vertices, resulting in smoother coastlines but larger SVG/PDF files and longer processing time.
+
+  # Fast preview
+  python -m icosahedron_map -r 110m --pdf
+
+  # High detail for printing
+  python -m icosahedron_map -r 10m --pdf
+
+> I think that the first colors in the palette are overly reprsented. can 
+you compute and give me the number of countries for each color ? 
+
+● Read(icosahedron_map/utils/coloring.py)
+  ⎿  Read 120 lines
+
+● Bash(source venv/bin/activate && python3 << 'EOF'
+      from icosahedron_map.data.downloader import NaturalEarthDownloader…)
+  ⎿ Using cached data: data/natural_earth/ne_110m_admin_0_countries/ne_110m
+    _admin_0_countries.shp
+    Color distribution:
+    … +12 lines (ctrl+o to expand)
+
+
+● You're right - the distribution is very uneven:
+
+  | Color    | Hex     | Count | %   |
+  |----------|---------|-------|-----|
+  | 0 Red    | #ed6b75 | 64    | 36% |
+  | 1 Green  | #5cbd6b | 49    | 28% |
+  | 2 Yellow | #f5d44a | 42    | 24% |
+  | 3 Blue   | #6080e0 | 21    | 12% |
+  | 4 Orange | #f5952a | 1     | <1% |
+  | 5-7      | —       | 0     | 0%  |
+
+  The greedy algorithm in coloring.py:79 always picks the first available color, causing this bias. To balance it, the algorithm should prefer the least-used color among valid choices. Want me to fix this?
+
+> yes please fix it 
+
+● Update(icosahedron_map/utils/coloring.py)
+  ⎿  Added 11 lines, removed 6 lines                                     
+      57  
+      58  def greedy_color(adjacency: Dict[int, List[int]], num_colors: i
+          nt = 8) -> Dict[int, int]:
+      59      """
+      60 -    Assign colors using greedy graph coloring.                 
+      60 +    Assign colors using greedy graph coloring with balanced dis
+         +tribution.                                                     
+      61  
+      62      Args:
+      63          adjacency: Adjacency graph (node -> list of neighbors)
+     ...
+      67          Dict mapping node index to color index (0 to num_colors
+          -1)
+      68      """
+      69      colors = {}
+      70 +    color_counts = [0] * num_colors  # Track usage of each colo
+         +r                                                              
+      71  
+      72      # Sort nodes by degree (most constrained first)
+      73      nodes = sorted(adjacency.keys(), key=lambda n: len(adjacenc
+          y[n]), reverse=True)
+     ...
+      76          # Find colors used by neighbors
+      77          neighbor_colors = {colors[n] for n in adjacency[node] i
+          f n in colors}
+      78  
+      78 -        # Assign first available color                         
+      79 -        for color in range(num_colors):                        
+      80 -            if color not in neighbor_colors:                   
+      81 -                colors[node] = color                           
+      82 -                break                                          
+      79 +        # Find available colors and pick the least used one    
+      80 +        available = [c for c in range(num_colors) if c not in n
+         +eighbor_colors]                                                
+      81 +                                                               
+      82 +        if available:                                          
+      83 +            # Choose the color with minimum usage count        
+      84 +            chosen = min(available, key=lambda c: color_counts[
+         +c])                                                            
+      85 +            colors[node] = chosen                              
+      86 +            color_counts[chosen] += 1                          
+      87          else:
+      88              # Fallback if all colors used (shouldn't happen wit
+          h 8 colors)
+      89              colors[node] = 0
+      90 +            color_counts[0] += 1                               
+      91  
+      92      return colors
+      93  
+
+● Bash(source venv/bin/activate && python3 << 'EOF'
+      from icosahedron_map.data.downloader import NaturalEarthDownloader…)
+  ⎿ Using cached data: data/natural_earth/ne_110m_admin_0_countries/ne_110m
+    _admin_0_countries.shp
+    Color distribution (after fix):
+    … +11 lines (ctrl+o to expand)
+
+
+● Fixed. The distribution is now balanced:
+
+  | Color | Count   |
+  |-------|---------|
+  | 0 Red | 23      |
+  | 1-7   | 22 each |
+
+  Changed greedy_color() to track usage counts and pick the least-used valid color instead of always picking the first available one.
+
+> commit 
+
+● Bash(git diff icosahedron_map/utils/coloring.py)
+  ⎿ diff --git a/icosahedron_map/utils/coloring.py b/icosahedron_map/utils/
+    coloring.py
+    index 3719f22..2e12db8 100644
+    … +51 lines (ctrl+o to expand)
+
+
+● Bash(git add icosahedron_map/utils/coloring.py && git commit -m "Fix uneven
+      color distribution in country coloring…)
+  ⎿  [main 4bbb90a] Fix uneven color distribution in country coloring
+      Committer: exe.dev user <exedev@green-blue.exe.xyz>
+     Your name and email address were configured automatically based
+     … +11 lines (ctrl+o to expand)
+
+● Committed 4bbb90a - Fix uneven color distribution in country coloring
+
+> by placing the net in oblique instead of horizontally in the page for the 
+PDF we could make it a bit bigger. compute by how much bigger 
+
+● Read(icosahedron_map/geometry/unfold.py)
+  ⎿  Read 174 lines
+
+● Bash(source venv/bin/activate && python3 << 'EOF'
+      import numpy as np…)
+  ⎿ Tool use rejected with user message: you should recompute width and height 
+    from the position of all vertex for each angle
+
+● Bash(source venv/bin/activate && python3 << 'EOF'
+      import numpy as np…)
+  ⎿  Net dimensions at 0°:        
+       Width:  5.5000 edges
+       Height: 2.5981 edges
+     … +8 lines (ctrl+o to expand)
+
+● Rotating the net by 14.1° would make it 7.4% larger:
+
+  | Orientation     | Edge length |
+  |-----------------|-------------|
+  | Horizontal (0°) | 54.0 mm     |
+  | Oblique (14.1°) | 58.0 mm     |
+
+  The net is 5.5 × 2.6 edges (wide and short). Tilting it uses the A4 diagonal more efficiently.
+
+  Want me to implement this option?
+
+> yes 
+
+● Read(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Read 56 lines
+
+● Write(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Added 128 lines, removed 3 lines                                    
+       4  Converts SVG output to A4 PDF format using cairosvg.
+       5  """
+       6  
+       7 +import re                                                      
+       8 +import math                                                    
+       9  import cairosvg
+      10  
+      11  # A4 dimensions in points (72 points per inch)
+     ...
+       17  A4_HEIGHT_MM = 297
+       18  
+       19  
+       18 -def svg_to_pdf(svg_string: str, output_path: str, landscape: b
+          -ool = True) -> None:                                          
+       20 +def _parse_svg_dimensions(svg_string: str) -> tuple:          
+       21 +    """Extract viewBox dimensions from SVG."""                
+       22 +    match = re.search(r'viewBox="([^"]+)"', svg_string)       
+       23 +    if match:                                                 
+       24 +        parts = match.group(1).split()                        
+       25 +        min_x, min_y, width, height = map(float, parts)       
+       26 +        return min_x, min_y, width, height                    
+       27 +    return 0, 0, 100, 100                                     
+       28 +                                                              
+       29 +                                                              
+       30 +def _find_optimal_angle(width: float, height: float, page_w: f
+          +loat, page_h: float) -> tuple:                                
+       31      """
+       32 +    Find rotation angle that maximizes scale on page.         
+       33 +                                                              
+       34 +    Args:                                                     
+       35 +        width, height: Content dimensions                     
+       36 +        page_w, page_h: Page dimensions                       
+       37 +                                                              
+       38 +    Returns:                                                  
+       39 +        (angle_degrees, scale_factor)                         
+       40 +    """                                                       
+       41 +    best_angle = 0                                            
+       42 +    best_scale = min(page_w / width, page_h / height)         
+       43 +                                                              
+       44 +    # Search angles from 0 to 45 degrees                      
+       45 +    for angle_deg in range(0, 451):                           
+       46 +        angle = angle_deg / 10.0                              
+       47 +        theta = math.radians(angle)                           
+       48 +        cos_t, sin_t = math.cos(theta), math.sin(theta)       
+       49 +                                                              
+       50 +        # Bounding box after rotation                         
+       51 +        rot_w = abs(width * cos_t) + abs(height * sin_t)      
+       52 +        rot_h = abs(width * sin_t) + abs(height * cos_t)      
+       53 +                                                              
+       54 +        scale = min(page_w / rot_w, page_h / rot_h)           
+       55 +                                                              
+       56 +        if scale > best_scale:                                
+       57 +            best_scale = scale                                
+       58 +            best_angle = angle                                
+       59 +                                                              
+       60 +    return best_angle, best_scale                             
+       61 +                                                              
+       62 +                                                              
+       63 +def _apply_rotation(svg_string: str, angle: float, width: floa
+          +t, height: float) -> str:                                     
+       64 +    """                                                       
+       65 +    Apply rotation transform to SVG content and adjust viewBox
+          +.                                                             
+       66 +                                                              
+       67 +    Args:                                                     
+       68 +        svg_string: Original SVG                              
+       69 +        angle: Rotation angle in degrees                      
+       70 +        width, height: Original content dimensions            
+       71 +                                                              
+       72 +    Returns:                                                  
+       73 +        Modified SVG string with rotation applied             
+       74 +    """                                                       
+       75 +    if angle == 0:                                            
+       76 +        return svg_string                                     
+       77 +                                                              
+       78 +    theta = math.radians(angle)                               
+       79 +    cos_t, sin_t = math.cos(theta), math.sin(theta)           
+       80 +                                                              
+       81 +    # Calculate new bounding box dimensions                   
+       82 +    new_width = abs(width * cos_t) + abs(height * sin_t)      
+       83 +    new_height = abs(width * sin_t) + abs(height * cos_t)     
+       84 +                                                              
+       85 +    # Parse original viewBox                                  
+       86 +    min_x, min_y, orig_w, orig_h = _parse_svg_dimensions(svg_s
+          +tring)                                                        
+       87 +                                                              
+       88 +    # Center of original content                              
+       89 +    cx = min_x + orig_w / 2                                   
+       90 +    cy = min_y + orig_h / 2                                   
+       91 +                                                              
+       92 +    # New viewBox centered on rotated content                 
+       93 +    new_min_x = cx - new_width / 2                            
+       94 +    new_min_y = cy - new_height / 2                           
+       95 +                                                              
+       96 +    # Create rotation transform around center                 
+       97 +    transform = f"rotate({angle} {cx} {cy})"                  
+       98 +                                                              
+       99 +    # Update viewBox                                          
+      100 +    new_viewbox = f"{new_min_x} {new_min_y} {new_width} {new_h
+          +eight}"                                                       
+      101 +    svg_string = re.sub(r'viewBox="[^"]+"', f'viewBox="{new_vi
+          +ewbox}"', svg_string)                                         
+      102 +                                                              
+      103 +    # Update size attributes                                  
+      104 +    svg_string = re.sub(r'width="[^"]+"', f'width="{new_width}
+          +px"', svg_string)                                             
+      105 +    svg_string = re.sub(r'height="[^"]+"', f'height="{new_heig
+          +ht}px"', svg_string)                                          
+      106 +                                                              
+      107 +    # Wrap content in a group with rotation transform         
+      108 +    # Find the closing </svg> and insert transform group      
+      109 +    svg_string = re.sub(                                      
+      110 +        r'(<svg[^>]*>)',                                      
+      111 +        r'\1<g transform="' + transform + '">',               
+      112 +        svg_string                                            
+      113 +    )                                                         
+      114 +    svg_string = svg_string.replace('</svg>', '</g></svg>')   
+      115 +                                                              
+      116 +    return svg_string                                         
+      117 +                                                              
+      118 +                                                              
+      119 +def svg_to_pdf(svg_string: str, output_path: str, landscape: b
+          +ool = True,                                                   
+      120 +               oblique: bool = False) -> None:                
+      121 +    """                                                       
+      122      Convert SVG string to A4 PDF.
+      123  
+      124      Args:
+      125          svg_string: SVG content as string
+      126          output_path: Output PDF file path
+      127          landscape: If True, use landscape orientation (default
+            for wide patterns)
+      128 +        oblique: If True, rotate content to maximize size on p
+          +age                                                           
+      129      """
+      130      if landscape:
+      131          page_width = A4_HEIGHT_PT  # 297mm in points
+      132          page_height = A4_WIDTH_PT  # 210mm in points
+      133 +        page_w_mm = A4_HEIGHT_MM                              
+      134 +        page_h_mm = A4_WIDTH_MM                               
+      135      else:
+      136          page_width = A4_WIDTH_PT
+      137          page_height = A4_HEIGHT_PT
+      138 +        page_w_mm = A4_WIDTH_MM                               
+      139 +        page_h_mm = A4_HEIGHT_MM                              
+      140  
+      141 +    if oblique:                                               
+      142 +        # Get content dimensions                              
+      143 +        min_x, min_y, width, height = _parse_svg_dimensions(sv
+          +g_string)                                                     
+      144 +                                                              
+      145 +        # Find optimal angle                                  
+      146 +        angle, scale = _find_optimal_angle(width, height, page
+          +_w_mm, page_h_mm)                                             
+      147 +                                                              
+      148 +        if angle > 0:                                         
+      149 +            # Calculate improvement                           
+      150 +            horiz_scale = min(page_w_mm / width, page_h_mm / h
+          +eight)                                                        
+      151 +            improvement = (scale / horiz_scale - 1) * 100     
+      152 +            print(f"   Rotating {angle:.1f}° for {improvement:
+          +.1f}% larger output")                                         
+      153 +                                                              
+      154 +            # Apply rotation                                  
+      155 +            svg_string = _apply_rotation(svg_string, angle, wi
+          +dth, height)                                                  
+      156 +                                                              
+      157      # Convert SVG to PDF, scaling to fit A4
+      158      cairosvg.svg2pdf(
+      159          bytestring=svg_string.encode('utf-8'),
+     ...
+      164      print(f"PDF saved to: {output_path}")
+      165  
+      166  
+       44 -def svg_file_to_pdf(svg_path: str, output_path: str, landscape
+          -: bool = True) -> None:                                       
+      167 +def svg_file_to_pdf(svg_path: str, output_path: str, landscape
+          +: bool = True,                                                
+      168 +                    oblique: bool = False) -> None:           
+      169      """
+      170      Convert SVG file to A4 PDF.
+      171  
+     ...
+      173          svg_path: Input SVG file path
+      174          output_path: Output PDF file path
+      175          landscape: If True, use landscape orientation
+      176 +        oblique: If True, rotate content to maximize size on p
+          +age                                                           
+      177      """
+      178      with open(svg_path, 'r', encoding='utf-8') as f:
+      179          svg_string = f.read()
+       55 -    svg_to_pdf(svg_string, output_path, landscape)            
+      180 +    svg_to_pdf(svg_string, output_path, landscape, oblique)   
+
+● Read(icosahedron_map/main.py)
+  ⎿  Read 30 lines
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 5 lines                                                       
+      78          action='store_true',
+      79          help="Output A4 PDF instead of SVG (landscape orientati
+          on)"
+      80      )
+      81 +    parser.add_argument(                                       
+      82 +        '--oblique',                                           
+      83 +        action='store_true',                                   
+      84 +        help="Rotate PDF output to maximize size on page (~7%% 
+         +larger)"                                                       
+      85 +    )                                                          
+      86  
+      87      args = parser.parse_args()
+      88  
+
+● Search(pattern: "svg_to_pdf", path: "icosahedron_map/main.py", output_mode:
+        "content")
+  ⎿  Found 2 lines (ctrl+o to expand)
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 1 line, removed 1 line                                        
+      187      # Save
+      188      if args.pdf:
+      189          svg_string = svg_gen.get_svg_string()
+      190 -        svg_to_pdf(svg_string, output_path, landscape=True)   
+      190 +        svg_to_pdf(svg_string, output_path, landscape=True, ob
+          +lique=args.oblique)                                           
+      191      else:
+      192          svg_gen.save()
+      193  
+
+● Bash(source venv/bin/activate && python -m icosahedron_map --pdf --oblique -r
+      110m -o test_oblique.pdf 2>&1)
+  ⎿  === Icosahedron Map Generator ===  
+
+     1. Building icosahedron geometry...
+     … +16 lines (ctrl+o to expand)
+
+● Bash(source venv/bin/activate && python3 << 'EOF'
+      from icosahedron_map.rendering.pdf_generator import _parse_svg_dimensions,
+       _find_optimal_angle…)
+  ⎿  Tool use rejected with user message: what do you want to debug and why ?
+
+● The rotation message didn't appear in the output, which means the angle was calculated as 0°. This happens because the calculation uses the SVG's pixel dimensions (550×285) instead of the aspect ratio. The aspect ratios are:
+
+  - Net: 550/285 = 1.93
+  - A4 landscape: 297/210 = 1.41
+
+  Since the net is wider than A4's aspect ratio, tilting helps. Let me fix the calculation to work with aspect ratios:
+
+● Update(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Added 21 lines, removed 8 lines                                     
+      32      Find rotation angle that maximizes scale on page.
+      33  
+      34      Args:
+      35 -        width, height: Content dimensions                      
+      36 -        page_w, page_h: Page dimensions                        
+      35 +        width, height: Content dimensions (any unit, only ratio
+         + matters)                                                      
+      36 +        page_w, page_h: Page dimensions (any unit, only ratio m
+         +atters)                                                        
+      37  
+      38      Returns:
+      39 -        (angle_degrees, scale_factor)                          
+      39 +        (angle_degrees, scale_factor relative to horizontal)   
+      40      """
+      41 +    # Normalize to work with aspect ratios                     
+      42 +    # Scale content so its max dimension = 1                   
+      43 +    content_max = max(width, height)                           
+      44 +    w = width / content_max                                    
+      45 +    h = height / content_max                                   
+      46 +                                                               
+      47 +    # Scale page similarly                                     
+      48 +    page_max = max(page_w, page_h)                             
+      49 +    pw = page_w / page_max                                     
+      50 +    ph = page_h / page_max                                     
+      51 +                                                               
+      52      best_angle = 0
+      42 -    best_scale = min(page_w / width, page_h / height)          
+      53 +    best_scale = min(pw / w, ph / h)                           
+      54  
+      55      # Search angles from 0 to 45 degrees
+      56      for angle_deg in range(0, 451):
+     ...
+      59          cos_t, sin_t = math.cos(theta), math.sin(theta)
+      60  
+      61          # Bounding box after rotation
+      51 -        rot_w = abs(width * cos_t) + abs(height * sin_t)       
+      52 -        rot_h = abs(width * sin_t) + abs(height * cos_t)       
+      62 +        rot_w = abs(w * cos_t) + abs(h * sin_t)                
+      63 +        rot_h = abs(w * sin_t) + abs(h * cos_t)                
+      64  
+      54 -        scale = min(page_w / rot_w, page_h / rot_h)            
+      65 +        scale = min(pw / rot_w, ph / rot_h)                    
+      66  
+      67          if scale > best_scale:
+      68              best_scale = scale
+      69              best_angle = angle
+      70  
+      60 -    return best_angle, best_scale                              
+      71 +    # Return relative improvement                              
+      72 +    horiz_scale = min(pw / w, ph / h)                          
+      73 +    return best_angle, best_scale / horiz_scale                
+      74  
+      75  
+      76  def _apply_rotation(svg_string: str, angle: float, width: float
+          , height: float) -> str:
+
+● Update(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Added 4 lines, removed 6 lines                                      
+      155          # Get content dimensions
+      156          min_x, min_y, width, height = _parse_svg_dimensions(sv
+           g_string)
+      157  
+      158 -        # Find optimal angle                                  
+      159 -        angle, scale = _find_optimal_angle(width, height, page
+          -_w_mm, page_h_mm)                                             
+      158 +        # Find optimal angle (returns angle and relative scale
+          + improvement)                                                 
+      159 +        angle, rel_scale = _find_optimal_angle(width, height, 
+          +page_w_mm, page_h_mm)                                         
+      160  
+      161 -        if angle > 0:                                         
+      162 -            # Calculate improvement                           
+      163 -            horiz_scale = min(page_w_mm / width, page_h_mm / h
+          -eight)                                                        
+      164 -            improvement = (scale / horiz_scale - 1) * 100     
+      161 +        if angle > 0.5:  # Only rotate if meaningful improveme
+          +nt                                                            
+      162 +            improvement = (rel_scale - 1) * 100               
+      163              print(f"   Rotating {angle:.1f}° for {improvement:
+           .1f}% larger output")
+      164  
+      165              # Apply rotation
+
+● Bash(source venv/bin/activate && python -m icosahedron_map --pdf --oblique -r
+      110m -o test_oblique.pdf 2>&1)
+  ⎿  === Icosahedron Map Generator ===  
+
+     1. Building icosahedron geometry...
+     … +16 lines (ctrl+o to expand)
+
+● Bash(source venv/bin/activate && python3 << 'EOF'
+      from icosahedron_map.rendering.pdf_generator import _find_optimal_angle…)
+  ⎿  Width x Height: 570 x 285    
+     Page: 297 x 210
+     Optimal angle: 0°
+     … +2 lines (ctrl+o to expand)
+
+● The issue is that the SVG viewBox is a rectangle, but the actual net shape isn't. The 7.4% improvement comes from the irregular net shape. Let me pass the actual vertex data:
+
+● Update(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Added 24 lines, removed 25 lines                                    
+       7  import re
+       8  import math
+       9  import cairosvg
+      10 +import numpy as np                                             
+      11  
+      12  # A4 dimensions in points (72 points per inch)
+      13  A4_WIDTH_PT = 595.28  # 210mm
+     ...
+      28      return 0, 0, 100, 100
+      29  
+      30  
+      30 -def _find_optimal_angle(width: float, height: float, page_w: fl
+         -oat, page_h: float) -> tuple:                                  
+      31 +def _get_rotated_bounds(vertices: np.ndarray, angle_deg: float)
+         + -> tuple:                                                     
+      32 +    """Get bounding box dimensions after rotating vertices.""" 
+      33 +    theta = math.radians(angle_deg)                            
+      34 +    cos_t, sin_t = math.cos(theta), math.sin(theta)            
+      35 +                                                               
+      36 +    rotated_x = vertices[:, 0] * cos_t - vertices[:, 1] * sin_t
+      37 +    rotated_y = vertices[:, 0] * sin_t + vertices[:, 1] * cos_t
+      38 +                                                               
+      39 +    width = rotated_x.max() - rotated_x.min()                  
+      40 +    height = rotated_y.max() - rotated_y.min()                 
+      41 +    return width, height                                       
+      42 +                                                               
+      43 +                                                               
+      44 +def _find_optimal_angle_from_vertices(vertices: np.ndarray, pag
+         +e_w: float, page_h: float) -> tuple:                           
+      45      """
+      32 -    Find rotation angle that maximizes scale on page.          
+      46 +    Find rotation angle that maximizes scale on page using actu
+         +al vertices.                                                   
+      47  
+      48      Args:
+      35 -        width, height: Content dimensions (any unit, only ratio
+         - matters)                                                      
+      36 -        page_w, page_h: Page dimensions (any unit, only ratio m
+         -atters)                                                        
+      49 +        vertices: Nx2 array of vertex coordinates              
+      50 +        page_w, page_h: Page dimensions                        
+      51  
+      52      Returns:
+      53          (angle_degrees, scale_factor relative to horizontal)
+      54      """
+      41 -    # Normalize to work with aspect ratios                     
+      42 -    # Scale content so its max dimension = 1                   
+      43 -    content_max = max(width, height)                           
+      44 -    w = width / content_max                                    
+      45 -    h = height / content_max                                   
+      55 +    # Horizontal placement                                     
+      56 +    w0, h0 = _get_rotated_bounds(vertices, 0)                  
+      57 +    horiz_scale = min(page_w / w0, page_h / h0)                
+      58  
+      47 -    # Scale page similarly                                     
+      48 -    page_max = max(page_w, page_h)                             
+      49 -    pw = page_w / page_max                                     
+      50 -    ph = page_h / page_max                                     
+      51 -                                                               
+      59      best_angle = 0
+      53 -    best_scale = min(pw / w, ph / h)                           
+      60 +    best_scale = horiz_scale                                   
+      61  
+      62      # Search angles from 0 to 45 degrees
+      63      for angle_deg in range(0, 451):
+      64          angle = angle_deg / 10.0
+      58 -        theta = math.radians(angle)                            
+      59 -        cos_t, sin_t = math.cos(theta), math.sin(theta)        
+      65 +        w, h = _get_rotated_bounds(vertices, angle)            
+      66 +        scale = min(page_w / w, page_h / h)                    
+      67  
+      61 -        # Bounding box after rotation                          
+      62 -        rot_w = abs(w * cos_t) + abs(h * sin_t)                
+      63 -        rot_h = abs(w * sin_t) + abs(h * cos_t)                
+      64 -                                                               
+      65 -        scale = min(pw / rot_w, ph / rot_h)                    
+      66 -                                                               
+      68          if scale > best_scale:
+      69              best_scale = scale
+      70              best_angle = angle
+      71  
+      71 -    # Return relative improvement                              
+      72 -    horiz_scale = min(pw / w, ph / h)                          
+      72      return best_angle, best_scale / horiz_scale
+      73  
+      74  
+
+● Update(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Added 6 lines, removed 5 lines                                      
+      129  
+      130  
+      131  def svg_to_pdf(svg_string: str, output_path: str, landscape: b
+           ool = True,
+      132 -               oblique: bool = False) -> None:                
+      132 +               oblique: bool = False, vertices: np.ndarray = N
+          +one) -> None:                                                 
+      133      """
+      134      Convert SVG string to A4 PDF.
+      135  
+     ...
+      138          output_path: Output PDF file path
+      139          landscape: If True, use landscape orientation (default
+            for wide patterns)
+      140          oblique: If True, rotate content to maximize size on p
+           age
+      141 +        vertices: Optional Nx2 array of net vertices for accur
+          +ate rotation calculation                                      
+      142      """
+      143      if landscape:
+      144          page_width = A4_HEIGHT_PT  # 297mm in points
+     ...
+      151          page_w_mm = A4_WIDTH_MM
+      152          page_h_mm = A4_HEIGHT_MM
+      153  
+      153 -    if oblique:                                               
+      154 -        # Get content dimensions                              
+      154 +    if oblique and vertices is not None:                      
+      155 +        # Get content dimensions from SVG                     
+      156          min_x, min_y, width, height = _parse_svg_dimensions(sv
+           g_string)
+      157  
+      157 -        # Find optimal angle (returns angle and relative scale
+          - improvement)                                                 
+      158 -        angle, rel_scale = _find_optimal_angle(width, height, 
+          -page_w_mm, page_h_mm)                                         
+      158 +        # Find optimal angle using actual vertices            
+      159 +        angle, rel_scale = _find_optimal_angle_from_vertices(v
+          +ertices, page_w_mm, page_h_mm)                                
+      160  
+      161          if angle > 0.5:  # Only rotate if meaningful improveme
+           nt
+      162              improvement = (rel_scale - 1) * 100
+
+● Read(icosahedron_map/main.py)
+  ⎿  Read 15 lines
+
+● Update(icosahedron_map/main.py)
+  ⎿  Added 10 lines, removed 1 line                                      
+      187      # Save
+      188      if args.pdf:
+      189          svg_string = svg_gen.get_svg_string()
+      190 -        svg_to_pdf(svg_string, output_path, landscape=True, ob
+          -lique=args.oblique)                                           
+      190 +        # Collect vertices for oblique rotation calculation   
+      191 +        vertices = None                                       
+      192 +        if args.oblique:                                      
+      193 +            import numpy as np                                
+      194 +            all_verts = []                                    
+      195 +            for face_idx in range(20):                        
+      196 +                all_verts.extend(unfolder.get_triangle_vertice
+          +s(face_idx))                                                  
+      197 +            vertices = np.array(all_verts)                    
+      198 +        svg_to_pdf(svg_string, output_path, landscape=True, ob
+          +lique=args.oblique,                                           
+      199 +                   vertices=vertices)                         
+      200      else:
+      201          svg_gen.save()
+      202  
+
+● Bash(source venv/bin/activate && python -m icosahedron_map --pdf --oblique -r
+      110m -o test_oblique.pdf 2>&1)
+  ⎿  === Icosahedron Map Generator ===  
+
+     1. Building icosahedron geometry...
+     … +17 lines (ctrl+o to expand)
+
+● Bash(ls -la /home/exedev/second_try/test_oblique.pdf)
+  ⎿ -rw-r--r-- 1 exedev exedev 128841 Apr 17 16:32 /home/exedev/second_try/
+    test_oblique.pdf
+
+
+● Bash(rm /home/exedev/second_try/test_oblique.pdf)
+  ⎿  (No content)
+
+● Done. Added --oblique flag that rotates the PDF output 14.1° for 7.4% larger size:
+
+  python -m icosahedron_map --pdf --oblique
+
+  The calculation uses actual triangle vertices (not rectangular bounding box) to find the optimal angle for the irregular net shape.
+
+> do not collect vertices in main but directly in _find_optimal_angle 
+
+● Update(icosahedron_map/rendering/pdf_generator.py)
+  ⎿  Added 9 lines, removed 3 lines                                      
+      41      return width, height
+      42  
+      43  
+      44 -def _find_optimal_angle_from_vertices(vertices: np.ndarray, pag
+         -e_w: float, page_h: float) -> tuple:                           
+      44 +def _find_optimal_angle_from_unfolder(unfolder, page_w: float, 
+         +page_h: float) -> tuple:                                       
+      45      """
+      46 -    Find rotation angle that maximizes scale on page using actu
+         -al vertices.                                                   
+      46 +    Find rotation angle that maximizes scale on page using actu
+         +al net vertices.                                               
+      47  
+      48      Args:
+      49 -        vertices: Nx2 array of vertex coordinates              
+      49 +        unfolder: IcosahedronUnfolder instance                 
+      50          page_w, page_h: Page dimensions
+      51  
+      52      Returns:
+      53          (angle_degrees, scale_factor relative to horizontal)
+      54      """
+      55 +    # Collect all triangle vertices                            
+      56 +    all_verts = []                                             
+      57 +    for face_idx in range(20):                                 
+      58 +        all_verts.extend(unfolder.get_triangle_vertices(face_id
+         +x))                                                            
+      59 +    vertices = np.array(all_verts)                             
+      60 +                                                               
+      61      # Horizontal placement
+      62      w0, h0 = _get_rotated_bounds(vertices, 0)
+      63      horiz_scale = min(page_w / w0, page_h / h0)
+  ⎿  You've hit your limit · resets 6pm (UTC)
+     /upgrade or /extra-usage to finish what you're working on.
+
+> /export /tmp/session.json 
+  ⎿  Failed to export conversation: ENOENT: no such file or directory, open '/home/exedev/second_try/tmp/session.txt'
+
+
+

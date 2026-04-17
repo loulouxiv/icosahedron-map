@@ -44,8 +44,11 @@ def _get_rotated_bounds(vertices: np.ndarray, angle_deg: float) -> tuple:
 
 def _get_tight_bounds(svg_string: str) -> tuple:
     """Get tight bounding box from all points in the SVG."""
-    all_x = []
-    all_y = []
+    min_x = float('inf')
+    max_x = float('-inf')
+    min_y = float('inf')
+    max_y = float('-inf')
+    found_point = False
 
     # Extract points from polygon elements: points="x1,y1 x2,y2 ..."
     for match in re.finditer(r'points="([^"]+)"', svg_string):
@@ -53,24 +56,27 @@ def _get_tight_bounds(svg_string: str) -> tuple:
         for point in points_str.split():
             if ',' in point:
                 x, y = point.split(',')
-                all_x.append(float(x))
-                all_y.append(float(y))
+                x, y = float(x), float(y)
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+                min_y = min(min_y, y)
+                max_y = max(max_y, y)
+                found_point = True
 
     # Extract points from path elements: d="M x,y L x,y ..."
     for match in re.finditer(r'\bd="([^"]+)"', svg_string):
         path_str = match.group(1)
         # Find all coordinate pairs (number,number or number number)
         for coord in re.finditer(r'(-?\d+\.?\d*)[,\s](-?\d+\.?\d*)', path_str):
-            all_x.append(float(coord.group(1)))
-            all_y.append(float(coord.group(2)))
+            x, y = float(coord.group(1)), float(coord.group(2))
+            min_x = min(min_x, x)
+            max_x = max(max_x, x)
+            min_y = min(min_y, y)
+            max_y = max(max_y, y)
+            found_point = True
 
-    if not all_x:
+    if not found_point:
         return _parse_svg_dimensions(svg_string)
-
-    min_x = min(all_x)
-    max_x = max(all_x)
-    min_y = min(all_y)
-    max_y = max(all_y)
 
     return min_x, min_y, max_x - min_x, max_y - min_y
 
