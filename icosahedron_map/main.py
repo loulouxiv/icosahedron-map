@@ -78,6 +78,16 @@ def main():
         action='store_true',
         help="Output A4 PDF instead of SVG (landscape orientation)"
     )
+    parser.add_argument(
+        '--oblique',
+        action='store_true',
+        help="Rotate PDF output to maximize size on page (~7%% larger)"
+    )
+    parser.add_argument(
+        '--no-margin',
+        action='store_true',
+        help="Remove margins in PDF output for tight bounding box"
+    )
 
     args = parser.parse_args()
 
@@ -182,7 +192,8 @@ def main():
     # Save
     if args.pdf:
         svg_string = svg_gen.get_svg_string()
-        svg_to_pdf(svg_string, output_path, landscape=True)
+        svg_to_pdf(svg_string, output_path, landscape=True, oblique=args.oblique,
+                   no_margin=args.no_margin)
     else:
         svg_gen.save()
 
