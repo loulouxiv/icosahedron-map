@@ -1,0 +1,6 @@
+venv/
+data/
+*.svg
+__pycache__/
+*.pyc
+.claude/
