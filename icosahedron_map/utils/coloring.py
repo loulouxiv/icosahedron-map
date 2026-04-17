@@ -57,7 +57,7 @@ def build_adjacency(gdf: gpd.GeoDataFrame) -> Dict[int, List[int]]:
 
 def greedy_color(adjacency: Dict[int, List[int]], num_colors: int = 8) -> Dict[int, int]:
     """
-    Assign colors using greedy graph coloring.
+    Assign colors using greedy graph coloring with balanced distribution.
 
     Args:
         adjacency: Adjacency graph (node -> list of neighbors)
@@ -67,6 +67,7 @@ def greedy_color(adjacency: Dict[int, List[int]], num_colors: int = 8) -> Dict[i
         Dict mapping node index to color index (0 to num_colors-1)
     """
     colors = {}
+    color_counts = [0] * num_colors  # Track usage of each color
 
     # Sort nodes by degree (most constrained first)
     nodes = sorted(adjacency.keys(), key=lambda n: len(adjacency[n]), reverse=True)
@@ -75,14 +76,18 @@ def greedy_color(adjacency: Dict[int, List[int]], num_colors: int = 8) -> Dict[i
         # Find colors used by neighbors
         neighbor_colors = {colors[n] for n in adjacency[node] if n in colors}
 
-        # Assign first available color
-        for color in range(num_colors):
-            if color not in neighbor_colors:
-                colors[node] = color
-                break
+        # Find available colors and pick the least used one
+        available = [c for c in range(num_colors) if c not in neighbor_colors]
+
+        if available:
+            # Choose the color with minimum usage count
+            chosen = min(available, key=lambda c: color_counts[c])
+            colors[node] = chosen
+            color_counts[chosen] += 1
         else:
             # Fallback if all colors used (shouldn't happen with 8 colors)
             colors[node] = 0
+            color_counts[0] += 1
 
     return colors
 
