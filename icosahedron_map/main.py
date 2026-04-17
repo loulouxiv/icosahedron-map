@@ -14,6 +14,7 @@ from .projection.gnomonic import create_all_projections
 from .projection.face_assignment import FaceAssignment
 from .data.downloader import NaturalEarthDownloader
 from .utils.clipping import SphericalClipper
+from .utils.coloring import assign_country_colors
 from .rendering.graticule import GraticuleGenerator
 from .rendering.svg_generator import IcosahedronSVGGenerator
 
@@ -66,6 +67,11 @@ def main():
         action='store_true',
         help="Disable face number labels"
     )
+    parser.add_argument(
+        '--color-countries',
+        action='store_true',
+        help="Colorize countries with contrasting colors"
+    )
 
     args = parser.parse_args()
 
@@ -94,12 +100,18 @@ def main():
 
     # 5. Download and process country data
     countries_by_face = None
+    country_colors = {}
     if not args.no_countries:
         print(f"5. Loading Natural Earth data ({args.resolution})...")
         try:
             downloader = NaturalEarthDownloader()
             countries_gdf = downloader.load_countries(args.resolution)
             print(f"   Loaded {len(countries_gdf)} countries")
+
+            # Compute country colors if requested
+            if args.color_countries:
+                print("   Assigning country colors...")
+                country_colors = assign_country_colors(countries_gdf)
 
             # 6. Clip countries to faces
             print("6. Clipping countries to faces...")
@@ -114,7 +126,8 @@ def main():
 
     # 7. Generate SVG
     print("7. Generating SVG...")
-    svg_gen = IcosahedronSVGGenerator(unfolder, face_projections, args.output)
+    svg_gen = IcosahedronSVGGenerator(unfolder, face_projections, args.output,
+                                       country_colors=country_colors)
 
     # Draw background (ocean)
     svg_gen.draw_face_backgrounds()

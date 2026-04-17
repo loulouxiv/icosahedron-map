@@ -21,7 +21,8 @@ class IcosahedronSVGGenerator:
 
     def __init__(self, unfolder: IcosahedronUnfolder,
                  face_projections: List[FaceProjection],
-                 output_path: str = "icosahedron_map.svg"):
+                 output_path: str = "icosahedron_map.svg",
+                 country_colors: Dict[str, str] = None):
         """
         Initialize SVG generator.
 
@@ -29,10 +30,12 @@ class IcosahedronSVGGenerator:
             unfolder: IcosahedronUnfolder instance
             face_projections: List of FaceProjection for all 20 faces
             output_path: Output SVG file path
+            country_colors: Optional dict mapping country name to fill color
         """
         self.unfolder = unfolder
         self.face_projections = face_projections
         self.output_path = output_path
+        self.country_colors = country_colors or {}
 
         # Get pattern bounds
         min_x, min_y, width, height = unfolder.get_pattern_bounds()
@@ -130,13 +133,15 @@ class IcosahedronSVGGenerator:
             geometry: Shapely geometry (Polygon or MultiPolygon)
             name: Country name for data attribute
         """
+        color = self.country_colors.get(name)
         if isinstance(geometry, MultiPolygon):
             for poly in geometry.geoms:
-                self._draw_single_polygon(face_idx, poly, name)
+                self._draw_single_polygon(face_idx, poly, name, color)
         elif isinstance(geometry, Polygon):
-            self._draw_single_polygon(face_idx, geometry, name)
+            self._draw_single_polygon(face_idx, geometry, name, color)
 
-    def _draw_single_polygon(self, face_idx: int, polygon: Polygon, name: str):
+    def _draw_single_polygon(self, face_idx: int, polygon: Polygon, name: str,
+                              color: str = None):
         """Draw a single polygon."""
         face_proj = self.face_projections[face_idx]
 
@@ -171,10 +176,17 @@ class IcosahedronSVGGenerator:
         if holes:
             # Use path for polygons with holes
             d = self._points_to_path_d(exterior_points, holes)
-            path = self.dwg.path(d=d, class_="country")
+            if color:
+                path = self.dwg.path(d=d, class_="country", style=f"fill:{color}")
+            else:
+                path = self.dwg.path(d=d, class_="country")
             self.countries_group.add(path)
         else:
-            poly = self.dwg.polygon(points=exterior_points, class_="country")
+            if color:
+                poly = self.dwg.polygon(points=exterior_points, class_="country",
+                                        style=f"fill:{color}")
+            else:
+                poly = self.dwg.polygon(points=exterior_points, class_="country")
             self.countries_group.add(poly)
 
     def _points_to_path_d(self, exterior: List, holes: List) -> str:

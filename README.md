@@ -38,12 +38,18 @@ python -m icosahedron_map -o map.svg
 | `--no-graticule` | Disable latitude/longitude grid | |
 | `--no-countries` | Disable country rendering | |
 | `--no-labels` | Disable face number labels | |
+| `--color-countries` | Colorize countries with contrasting colors | |
 
 ### Examples
 
 High resolution with fine graticule:
 ```bash
 python -m icosahedron_map -r 10m -s 200 --lat-step 10 --lon-step 10 -o detailed.svg
+```
+
+Colorful map:
+```bash
+python -m icosahedron_map --color-countries -o colorful.svg
 ```
 
 Simple outline only:
@@ -65,7 +71,8 @@ icosahedron_map/
 │   ├── svg_generator.py # SVG output with layers
 │   └── graticule.py     # Lat/lon grid generation
 ├── utils/
-│   └── clipping.py      # Polygon clipping to face boundaries
+│   ├── clipping.py      # Polygon clipping to face boundaries
+│   └── coloring.py      # Graph coloring for country colors
 └── data/
     └── downloader.py    # Natural Earth data fetching
 ```
