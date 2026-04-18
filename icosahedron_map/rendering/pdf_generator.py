@@ -29,8 +29,14 @@ def _parse_svg_dimensions(svg_string: str) -> tuple:
     return 0, 0, 100, 100
 
 
-def _get_rotated_bounds(vertices: np.ndarray, angle_deg: float) -> tuple:
-    """Get bounding box after rotating vertices.
+def _get_rotated_bounds(vertices: np.ndarray, angle_deg: float,
+                         center: tuple = None) -> tuple:
+    """Get bounding box after rotating vertices around a center point.
+
+    Args:
+        vertices: Nx2 array of vertex coordinates
+        angle_deg: Rotation angle in degrees
+        center: (cx, cy) rotation center. If None, rotates around origin.
 
     Returns:
         (min_x, min_y, width, height) of rotated bounding box
@@ -38,52 +44,22 @@ def _get_rotated_bounds(vertices: np.ndarray, angle_deg: float) -> tuple:
     theta = math.radians(angle_deg)
     cos_t, sin_t = math.cos(theta), math.sin(theta)
 
-    rotated_x = vertices[:, 0] * cos_t - vertices[:, 1] * sin_t
-    rotated_y = vertices[:, 0] * sin_t + vertices[:, 1] * cos_t
+    if center is not None:
+        cx, cy = center
+        # Rotate around center point
+        dx = vertices[:, 0] - cx
+        dy = vertices[:, 1] - cy
+        rotated_x = cx + dx * cos_t - dy * sin_t
+        rotated_y = cy + dx * sin_t + dy * cos_t
+    else:
+        # Rotate around origin
+        rotated_x = vertices[:, 0] * cos_t - vertices[:, 1] * sin_t
+        rotated_y = vertices[:, 0] * sin_t + vertices[:, 1] * cos_t
 
     min_x = rotated_x.min()
     max_x = rotated_x.max()
     min_y = rotated_y.min()
     max_y = rotated_y.max()
-
-    return min_x, min_y, max_x - min_x, max_y - min_y
-
-
-def _get_tight_bounds(svg_string: str) -> tuple:
-    """Get tight bounding box from all points in the SVG."""
-    min_x = float('inf')
-    max_x = float('-inf')
-    min_y = float('inf')
-    max_y = float('-inf')
-    found_point = False
-
-    # Extract points from polygon elements: points="x1,y1 x2,y2 ..."
-    for match in re.finditer(r'points="([^"]+)"', svg_string):
-        points_str = match.group(1)
-        for point in points_str.split():
-            if ',' in point:
-                x, y = point.split(',')
-                x, y = float(x), float(y)
-                min_x = min(min_x, x)
-                max_x = max(max_x, x)
-                min_y = min(min_y, y)
-                max_y = max(max_y, y)
-                found_point = True
-
-    # Extract points from path elements: d="M x,y L x,y ..."
-    for match in re.finditer(r'\bd="([^"]+)"', svg_string):
-        path_str = match.group(1)
-        # Find all coordinate pairs (number,number or number number)
-        for coord in re.finditer(r'(-?\d+\.?\d*)[,\s](-?\d+\.?\d*)', path_str):
-            x, y = float(coord.group(1)), float(coord.group(2))
-            min_x = min(min_x, x)
-            max_x = max(max_x, x)
-            min_y = min(min_y, y)
-            max_y = max(max_y, y)
-            found_point = True
-
-    if not found_point:
-        return _parse_svg_dimensions(svg_string)
 
     return min_x, min_y, max_x - min_x, max_y - min_y
 
@@ -158,12 +134,16 @@ def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
         for face_idx in range(20):
             all_verts.extend(unfolder.get_triangle_vertices(face_idx))
         vertices = np.array(all_verts)
-        rot_min_x, rot_min_y, rot_width, rot_height = _get_rotated_bounds(vertices, angle)
-        # Scale the rotated bounds
+        # Rotate around the same center as the SVG transform
+        rot_min_x, rot_min_y, rot_width, rot_height = _get_rotated_bounds(
+            vertices, angle, center=(cx, cy))
+        # Scale the viewBox around the center of rotated content
+        rot_cx = rot_min_x + rot_width / 2
+        rot_cy = rot_min_y + rot_height / 2
         new_width = rot_width / scale
         new_height = rot_height / scale
-        new_min_x = rot_min_x / scale
-        new_min_y = rot_min_y / scale
+        new_min_x = rot_cx - new_width / 2
+        new_min_y = rot_cy - new_height / 2
     else:
         # Fallback to rectangle-based calculation if unfolder not available
         rot_width = abs(width * cos_t) + abs(height * sin_t)
@@ -221,7 +201,7 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
         page_h_mm = A4_HEIGHT_MM
 
     if oblique:
-        # Get content dimensions from SVG
+        # Get content dimensions from SVG (now tight if no_margin was applied)
         min_x, min_y, width, height = _parse_svg_dimensions(svg_string)
 
         # Find optimal angle
@@ -232,15 +212,7 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
             print(f"   Rotating {angle:.1f}° for {improvement:.1f}% larger output")
 
             # Apply rotation and scale
-            svg_string = _apply_rotation(svg_string, angle, width, height, rel_scale, unfolder)
-
-    if no_margin:
-        # Recompute viewBox from tight bounding box
-        min_x, min_y, width, height = _get_tight_bounds(svg_string)
-        new_viewbox = f"{min_x} {min_y} {width} {height}"
-        svg_string = re.sub(r'viewBox="[^"]+"', f'viewBox="{new_viewbox}"', svg_string)
-        svg_string = re.sub(r'width="[^"]+"', f'width="{width}px"', svg_string)
-        svg_string = re.sub(r'height="[^"]+"', f'height="{height}px"', svg_string)
+            svg_string = _apply_rotation(svg_string, angle, width, height, 1, unfolder)
 
     # Convert SVG to PDF, scaling to fit A4
     cairosvg.svg2pdf(

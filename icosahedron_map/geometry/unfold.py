@@ -16,14 +16,16 @@ class IcosahedronUnfolder:
     Computes the 2D layout of the unfolded icosahedron pattern.
     """
 
-    def __init__(self, edge_length: float = 100.0):
+    def __init__(self, edge_length: float = 100.0, margin: float = 0.1):
         """
         Initialize the unfolder.
 
         Args:
             edge_length: Length of triangle edge in output units (pixels).
+            margin: Margin as fraction of edge_length. Use 0.0 for no margin.
         """
         self.edge_length = edge_length
+        self.margin = margin
         self.triangle_height = edge_length * np.sqrt(3) / 2
 
         # Compute face positions in the 2D pattern
@@ -163,9 +165,9 @@ class IcosahedronUnfolder:
         max_y = max(all_y)
 
         # Add margins
-        margin = self.edge_length * 0.1
-        return (min_x - margin, min_y - margin,
-                max_x - min_x + 2 * margin, max_y - min_y + 2 * margin)
+        margin_size = self.edge_length * self.margin
+        return (min_x - margin_size, min_y - margin_size,
+                max_x - min_x + 2 * margin_size, max_y - min_y + 2 * margin_size)
 
     def get_face_label_position(self, face_idx: int) -> Tuple[float, float]:
         """Get position for face label (at center)."""
