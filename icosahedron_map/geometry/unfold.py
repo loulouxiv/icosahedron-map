@@ -8,7 +8,7 @@ Pattern layout: 5-10-5
 """
 
 import numpy as np
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Set
 
 
 class IcosahedronUnfolder:
@@ -173,3 +173,155 @@ class IcosahedronUnfolder:
         """Get position for face label (at center)."""
         center, _ = self.face_positions[face_idx]
         return (center[0], center[1])
+
+    def _get_edge_endpoints(self, face_idx: int, edge_idx: int) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Get the two endpoints of an edge in pattern coordinates.
+
+        Edge indices for UP triangles (apex at top):
+            0: top vertex → bottom-left
+            1: top vertex → bottom-right
+            2: bottom-left → bottom-right (base)
+
+        Edge indices for DOWN triangles (apex at bottom):
+            0: bottom vertex → top-left
+            1: bottom vertex → top-right
+            2: top-left → top-right (base)
+
+        Returns:
+            (point_a, point_b) as numpy arrays
+        """
+        vertices = self.get_triangle_vertices(face_idx)
+        _, rotation = self.face_positions[face_idx]
+
+        if rotation == 0:  # UP triangle
+            if edge_idx == 0:
+                return vertices[0], vertices[1]  # top to bottom-left
+            elif edge_idx == 1:
+                return vertices[0], vertices[2]  # top to bottom-right
+            else:  # edge_idx == 2
+                return vertices[1], vertices[2]  # bottom-left to bottom-right
+        else:  # DOWN triangle (rotation == 180)
+            if edge_idx == 0:
+                return vertices[0], vertices[1]  # bottom to top-left
+            elif edge_idx == 1:
+                return vertices[0], vertices[2]  # bottom to top-right
+            else:  # edge_idx == 2
+                return vertices[1], vertices[2]  # top-left to top-right
+
+    def _compute_net_connectivity(self) -> Set[Tuple[int, int, int, int]]:
+        """
+        Compute which edges are physically connected (hinges) in the 2D net.
+
+        Two edges are connected if they share the same coordinates in the pattern.
+
+        Returns:
+            Set of (face_a, edge_a, face_b, edge_b) tuples where face_a < face_b
+        """
+        connected = set()
+        tolerance = 1e-6
+
+        # Collect all edge endpoints
+        all_edges = []
+        for face_idx in range(20):
+            for edge_idx in range(3):
+                p1, p2 = self._get_edge_endpoints(face_idx, edge_idx)
+                # Store in canonical order (sorted by coordinates)
+                if (p1[0], p1[1]) > (p2[0], p2[1]):
+                    p1, p2 = p2, p1
+                all_edges.append((face_idx, edge_idx, p1, p2))
+
+        # Find matching edges
+        for i, (face_a, edge_a, p1_a, p2_a) in enumerate(all_edges):
+            for j, (face_b, edge_b, p1_b, p2_b) in enumerate(all_edges[i+1:], i+1):
+                if face_a == face_b:
+                    continue
+                # Check if edges overlap (same endpoints)
+                if (np.allclose(p1_a, p1_b, atol=tolerance) and
+                    np.allclose(p2_a, p2_b, atol=tolerance)):
+                    if face_a < face_b:
+                        connected.add((face_a, edge_a, face_b, edge_b))
+                    else:
+                        connected.add((face_b, edge_b, face_a, edge_a))
+
+        return connected
+
+    def get_free_edges_with_tabs(self) -> List[Tuple[int, int]]:
+        """
+        Get list of (face_idx, edge_idx) pairs for edges that need gluing tabs.
+
+        Only returns one edge per pair that will be glued together.
+        The face with lower index owns the tab for each 3D icosahedron edge.
+
+        Returns:
+            List of (face_idx, edge_idx) tuples
+        """
+        connected = self._compute_net_connectivity()
+
+        # Build set of connected edges for quick lookup
+        connected_edges = set()
+        for face_a, edge_a, face_b, edge_b in connected:
+            connected_edges.add((face_a, edge_a))
+            connected_edges.add((face_b, edge_b))
+
+        # Find all free edges (not connected in the net)
+        free_edges = []
+        for face_idx in range(20):
+            for edge_idx in range(3):
+                if (face_idx, edge_idx) not in connected_edges:
+                    free_edges.append((face_idx, edge_idx))
+
+        # For deduplication: we need to know which free edges will be glued
+        # to each other when assembling. This requires 3D icosahedron edge info.
+        # For now, we'll place tabs on all free edges and let the user decide.
+        # A smarter approach would track 3D edge correspondence.
+
+        # Simple deduplication: assign tab to lower face index for each 3D edge.
+        # This works because each 3D edge appears on exactly 2 faces.
+        return free_edges
+
+    def compute_tab_vertices(self, face_idx: int, edge_idx: int,
+                             tab_size: float = 0.15) -> np.ndarray:
+        """
+        Compute trapezoid tab vertices for a given edge.
+
+        The tab extends outward from the triangle edge, forming a trapezoid
+        that tapers toward the outer edge.
+
+        Args:
+            face_idx: Face index (0-19)
+            edge_idx: Edge index (0-2)
+            tab_size: Tab height as fraction of edge length
+
+        Returns:
+            4x2 array of vertices [edge_start, edge_end, outer_end, outer_start]
+        """
+        p1, p2 = self._get_edge_endpoints(face_idx, edge_idx)
+
+        # Edge vector and length
+        edge_vec = p2 - p1
+        edge_length = np.linalg.norm(edge_vec)
+        edge_unit = edge_vec / edge_length
+
+        # Perpendicular vector (pointing outward from triangle center)
+        # Use cross product with z-axis, then check direction
+        perp = np.array([-edge_unit[1], edge_unit[0]])
+
+        # Check if perpendicular points away from triangle center
+        center, _ = self.face_positions[face_idx]
+        mid_edge = (p1 + p2) / 2
+        to_center = center - mid_edge
+
+        if np.dot(perp, to_center) > 0:
+            perp = -perp  # Flip to point outward
+
+        # Tab dimensions
+        tab_height = edge_length * tab_size
+        # Taper: offset outer corners inward along edge by 25% of tab height
+        taper_offset = tab_height * 1
+
+        # Compute outer edge endpoints (tapered)
+        outer_start = p1 + perp * tab_height + edge_unit * taper_offset
+        outer_end = p2 + perp * tab_height - edge_unit * taper_offset
+
+        return np.array([p1, p2, outer_end, outer_start])

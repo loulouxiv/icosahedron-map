@@ -95,6 +95,18 @@ def main():
         metavar='MM',
         help="PDF margin size in millimeters (only for PDF output, default: 0)"
     )
+    parser.add_argument(
+        '--tabs',
+        action='store_true',
+        help="Add gluing tabs to free edges for paper model assembly"
+    )
+    parser.add_argument(
+        '--tab-size',
+        type=float,
+        default=0.15,
+        metavar='FRACTION',
+        help="Tab height as fraction of edge length (default: 0.15)"
+    )
 
     args = parser.parse_args()
 
@@ -172,6 +184,11 @@ def main():
 
     # Draw background (ocean)
     svg_gen.draw_face_backgrounds()
+
+    # Draw gluing tabs (if enabled)
+    if args.tabs:
+        print("   Drawing gluing tabs...")
+        svg_gen.draw_gluing_tabs(tab_size=args.tab_size)
 
     # Draw countries
     if countries_by_face:

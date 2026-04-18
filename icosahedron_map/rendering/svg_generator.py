@@ -37,7 +37,7 @@ class IcosahedronSVGGenerator:
         self.output_path = output_path
         self.country_colors = country_colors or {}
 
-        # Get pattern bounds
+        # Get pattern bounds (tabs are intentionally excluded - they spill outside)
         min_x, min_y, width, height = unfolder.get_pattern_bounds()
 
         # Create SVG document
@@ -52,13 +52,15 @@ class IcosahedronSVGGenerator:
 
         # Create layer groups
         self.background_group = self.dwg.g(id="background")
+        self.tabs_group = self.dwg.g(id="glue-tabs")
         self.countries_group = self.dwg.g(id="countries")
         self.graticule_group = self.dwg.g(id="graticule")
         self.face_outlines_group = self.dwg.g(id="face-outlines")
         self.labels_group = self.dwg.g(id="labels")
 
-        # Add groups in order (background first)
+        # Add groups in order (background first, tabs behind countries)
         self.dwg.add(self.background_group)
+        self.dwg.add(self.tabs_group)
         self.dwg.add(self.countries_group)
         self.dwg.add(self.graticule_group)
         self.dwg.add(self.face_outlines_group)
@@ -97,6 +99,12 @@ class IcosahedronSVGGenerator:
                 font-size: 6px;
                 fill: #666;
             }
+            .glue-tab {
+                fill: #e8e8e8;
+                stroke: #999;
+                stroke-width: 0.3;
+                stroke-dasharray: 2,2;
+            }
         """))
 
     def draw_face_backgrounds(self):
@@ -110,6 +118,31 @@ class IcosahedronSVGGenerator:
                 class_="face-background"
             )
             self.background_group.add(triangle)
+
+    def draw_gluing_tabs(self, tab_size: float = 0.15):
+        """
+        Draw gluing tabs on free edges of the net.
+
+        Tabs are trapezoidal flaps that extend outward from edges that
+        are not connected to adjacent triangles in the unfolded pattern.
+        These tabs are used for gluing the paper model together.
+
+        Note: Tabs intentionally extend beyond the viewbox bounds.
+
+        Args:
+            tab_size: Tab height as fraction of edge length (default: 0.15)
+        """
+        free_edges = self.unfolder.get_free_edges_with_tabs()
+
+        for face_idx, edge_idx in free_edges:
+            vertices = self.unfolder.compute_tab_vertices(face_idx, edge_idx, tab_size)
+            points = [(v[0], v[1]) for v in vertices]
+
+            tab = self.dwg.polygon(
+                points=points,
+                class_="glue-tab"
+            )
+            self.tabs_group.add(tab)
 
     def draw_face_outlines(self):
         """Draw outlines of all triangular faces."""
