@@ -88,6 +88,13 @@ def main():
         action='store_true',
         help="Remove margins in PDF output for tight bounding box"
     )
+    parser.add_argument(
+        '--margin-mm',
+        type=float,
+        default=0,
+        metavar='MM',
+        help="PDF margin size in millimeters (only for PDF output, default: 0)"
+    )
 
     args = parser.parse_args()
 
@@ -194,7 +201,7 @@ def main():
     if args.pdf:
         svg_string = svg_gen.get_svg_string()
         svg_to_pdf(svg_string, output_path, landscape=True, oblique=args.oblique,
-                   no_margin=args.no_margin, unfolder=unfolder)
+                   no_margin=args.no_margin, margin_mm=args.margin_mm, unfolder=unfolder)
     else:
         svg_gen.save()
 

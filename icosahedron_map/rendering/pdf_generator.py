@@ -64,16 +64,21 @@ def _get_rotated_bounds(vertices: np.ndarray, angle_deg: float,
     return min_x, min_y, max_x - min_x, max_y - min_y
 
 
-def _find_optimal_angle(page_w: float, page_h: float) -> tuple:
+def _find_optimal_angle(page_w: float, page_h: float, margin_mm: float = 0) -> tuple:
     """
     Find rotation angle that maximizes scale on page using actual net vertices.
 
     Args:
-        page_w, page_h: Page dimensions
+        page_w, page_h: Page dimensions in mm
+        margin_mm: Margin in mm to subtract from all sides
 
     Returns:
         (angle_degrees, scale_factor relative to horizontal)
     """
+    # Reduce available page space by margins (applied to all sides)
+    available_w = page_w - 2 * margin_mm
+    available_h = page_h - 2 * margin_mm
+
     # Collect all triangle vertices
     unfolder = IcosahedronUnfolder()
     all_verts = []
@@ -83,7 +88,7 @@ def _find_optimal_angle(page_w: float, page_h: float) -> tuple:
 
     # Horizontal placement
     _, _, w0, h0 = _get_rotated_bounds(vertices, 0)
-    horiz_scale = min(page_w / w0, page_h / h0)
+    horiz_scale = min(available_w / w0, available_h / h0)
 
     best_angle = 0
     best_scale = horiz_scale
@@ -92,7 +97,7 @@ def _find_optimal_angle(page_w: float, page_h: float) -> tuple:
     for angle_deg in range(0, 451):
         angle = angle_deg / 10.0
         _, _, w, h = _get_rotated_bounds(vertices, angle)
-        scale = min(page_w / w, page_h / h)
+        scale = min(available_w / w, available_h / h)
 
         if scale > best_scale:
             best_scale = scale
@@ -177,6 +182,7 @@ def _apply_rotation(svg_string: str, angle: float, width: float, height: float,
 
 def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
                oblique: bool = False, no_margin: bool = False,
+               margin_mm: float = 0,
                unfolder: IcosahedronUnfolder = None) -> None:
     """
     Convert SVG string to A4 PDF.
@@ -186,7 +192,8 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
         output_path: Output PDF file path
         landscape: If True, use landscape orientation (default for wide patterns)
         oblique: If True, rotate content to maximize size on page
-        no_margin: If True, remove margins for tight bounding box
+        no_margin: If True, remove margins for tight bounding box (deprecated)
+        margin_mm: Margin size in millimeters (applied to all sides)
         unfolder: Optional IcosahedronUnfolder instance for accurate rotation bounds
     """
     if landscape:
@@ -205,7 +212,7 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
         min_x, min_y, width, height = _parse_svg_dimensions(svg_string)
 
         # Find optimal angle
-        angle, rel_scale = _find_optimal_angle(page_w_mm, page_h_mm)
+        angle, rel_scale = _find_optimal_angle(page_w_mm, page_h_mm, margin_mm)
 
         if angle > 0.5:  # Only rotate if meaningful improvement
             improvement = (rel_scale - 1) * 100
@@ -214,7 +221,42 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
             # Apply rotation and scale
             svg_string = _apply_rotation(svg_string, angle, width, height, 1, unfolder)
 
-    # Convert SVG to PDF, scaling to fit A4
+    # Apply margins by expanding the viewBox (makes content appear smaller)
+    if margin_mm > 0:
+        # Parse current viewBox
+        min_x, min_y, vb_width, vb_height = _parse_svg_dimensions(svg_string)
+
+        # Calculate available space after margins
+        avail_w = page_w_mm - 2 * margin_mm
+        avail_h = page_h_mm - 2 * margin_mm
+
+        # Determine which dimension is the bottleneck (preserves aspect ratio)
+        # Content should fit within available space
+        content_ar = vb_width / vb_height
+        avail_ar = avail_w / avail_h
+
+        if content_ar > avail_ar:
+            # Width-constrained: content is wider relative to available space
+            scale = page_w_mm / avail_w
+        else:
+            # Height-constrained: content is taller relative to available space
+            scale = page_h_mm / avail_h
+
+        # Expand viewBox by same factor for both dimensions (preserves aspect ratio)
+        new_vb_width = vb_width * scale
+        new_vb_height = vb_height * scale
+
+        # Recenter the viewBox to keep content centered
+        new_min_x = min_x - (new_vb_width - vb_width) / 2
+        new_min_y = min_y - (new_vb_height - vb_height) / 2
+
+        # Update SVG viewBox
+        new_viewbox = f"{new_min_x} {new_min_y} {new_vb_width} {new_vb_height}"
+        svg_string = re.sub(r'viewBox="[^"]+"', f'viewBox="{new_viewbox}"', svg_string)
+        svg_string = re.sub(r'width="[^"]+"', f'width="{new_vb_width}px"', svg_string)
+        svg_string = re.sub(r'height="[^"]+"', f'height="{new_vb_height}px"', svg_string)
+
+    # Convert SVG to PDF at full page size
     cairosvg.svg2pdf(
         bytestring=svg_string.encode('utf-8'),
         write_to=output_path,
