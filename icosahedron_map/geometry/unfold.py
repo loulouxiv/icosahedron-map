@@ -16,17 +16,21 @@ class IcosahedronUnfolder:
     Computes the 2D layout of the unfolded icosahedron pattern.
     """
 
-    def __init__(self, edge_length: float = 100.0, margin: float = 0.1):
+    def __init__(self, edge_length: float = 100.0, margin: float = 0.1,
+                 face_indices: List[Tuple[int, int, int]] = None):
         """
         Initialize the unfolder.
 
         Args:
             edge_length: Length of triangle edge in output units (pixels).
             margin: Margin as fraction of edge_length. Use 0.0 for no margin.
+            face_indices: Optional list of (v0, v1, v2) vertex indices for each
+                         face from the 3D icosahedron. Required for tab deduplication.
         """
         self.edge_length = edge_length
         self.margin = margin
         self.triangle_height = edge_length * np.sqrt(3) / 2
+        self.face_indices = face_indices
 
         # Compute face positions in the 2D pattern
         self.face_positions = self._compute_face_positions()
@@ -209,6 +213,81 @@ class IcosahedronUnfolder:
             else:  # edge_idx == 2
                 return vertices[1], vertices[2]  # top-left to top-right
 
+    def _build_3d_edge_map(self) -> Dict[Tuple[int, int], Tuple[int, int]]:
+        """
+        Build a map from (face_idx, edge_idx) to 3D edge (vertex pair).
+
+        This uses the 2D net connectivity to determine which 3D edges correspond
+        to which 2D edges, by finding the shared 3D edge between adjacent faces.
+
+        Returns:
+            Dict mapping (face_idx, 2d_edge_idx) to (min_vertex, max_vertex)
+        """
+        if self.face_indices is None:
+            return {}
+
+        edge_map = {}
+        connected = self._compute_net_connectivity()
+
+        # For each hinge (connected edge pair), find the shared 3D edge
+        for face_a, edge_a, face_b, edge_b in connected:
+            verts_a = set(self.face_indices[face_a])
+            verts_b = set(self.face_indices[face_b])
+            shared = verts_a & verts_b
+
+            if len(shared) == 2:
+                edge_3d = tuple(sorted(shared))
+                edge_map[(face_a, edge_a)] = edge_3d
+                edge_map[(face_b, edge_b)] = edge_3d
+
+        # For edges not in hinges, compute from face_indices directly
+        # (these are free edges - we need to find their 3D edge identity)
+        for face_idx in range(20):
+            v0, v1, v2 = self.face_indices[face_idx]
+            all_edges_3d = [
+                tuple(sorted((v0, v1))),
+                tuple(sorted((v0, v2))),
+                tuple(sorted((v1, v2)))
+            ]
+
+            for edge_idx in range(3):
+                if (face_idx, edge_idx) in edge_map:
+                    continue  # Already mapped via hinge
+
+                # Find which 3D edge this 2D edge corresponds to
+                # by checking the 2D vertex positions
+                p1, p2 = self._get_edge_endpoints(face_idx, edge_idx)
+
+                # The 2D edge must be one of the three 3D edges of this face
+                # We need to determine which one by comparing with hinge-mapped edges
+                # to find the remaining unmapped 3D edge
+                mapped_edges = [edge_map.get((face_idx, i)) for i in range(3)]
+                unmapped_3d = [e for e in all_edges_3d if e not in mapped_edges]
+
+                if len(unmapped_3d) == 1:
+                    edge_map[(face_idx, edge_idx)] = unmapped_3d[0]
+                elif len(unmapped_3d) > 1:
+                    # Multiple unmapped - need another approach
+                    # This shouldn't happen if face has at least 2 hinges
+                    edge_map[(face_idx, edge_idx)] = unmapped_3d[0]
+
+        return edge_map
+
+    def _get_3d_edge(self, face_idx: int, edge_idx: int) -> Tuple[int, int]:
+        """
+        Get the 3D icosahedron edge (as vertex index pair) for a 2D edge.
+
+        Returns:
+            (min_vertex, max_vertex) canonical edge identifier
+        """
+        if self.face_indices is None:
+            raise ValueError("face_indices required for 3D edge lookup")
+
+        if not hasattr(self, '_edge_map_cache'):
+            self._edge_map_cache = self._build_3d_edge_map()
+
+        return self._edge_map_cache.get((face_idx, edge_idx), (0, 0))
+
     def _compute_net_connectivity(self) -> Set[Tuple[int, int, int, int]]:
         """
         Compute which edges are physically connected (hinges) in the 2D net.
@@ -271,13 +350,74 @@ class IcosahedronUnfolder:
                 if (face_idx, edge_idx) not in connected_edges:
                     free_edges.append((face_idx, edge_idx))
 
-        # For deduplication: we need to know which free edges will be glued
-        # to each other when assembling. This requires 3D icosahedron edge info.
-        # For now, we'll place tabs on all free edges and let the user decide.
-        # A smarter approach would track 3D edge correspondence.
+        # Deduplicate using 3D edge info if available
+        if self.face_indices is not None:
+            # Group free edges by their 3D icosahedron edge
+            edge_to_faces: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+            for face_idx, edge_idx in free_edges:
+                edge_3d = self._get_3d_edge(face_idx, edge_idx)
+                if edge_3d not in edge_to_faces:
+                    edge_to_faces[edge_3d] = []
+                edge_to_faces[edge_3d].append((face_idx, edge_idx))
 
-        # Simple deduplication: assign tab to lower face index for each 3D edge.
-        # This works because each 3D edge appears on exactly 2 faces.
+            # Find a face that can be kept completely clean (no tabs)
+            # Prefer faces in row 1 (0-4) or row 3 (15-19)
+            # A face can be clean if all its 3D edges have alternative placements
+            clean_face = None
+            for candidate in [2, 17, 0, 4, 15, 19, 1, 3, 16, 18]:  # Try middle faces first
+                can_be_clean = True
+                for edge_3d, occurrences in edge_to_faces.items():
+                    # Check if this edge involves the candidate face
+                    on_candidate = [o for o in occurrences if o[0] == candidate]
+                    not_on_candidate = [o for o in occurrences if o[0] != candidate]
+                    if on_candidate and not not_on_candidate:
+                        # Edge only appears on candidate - can't avoid it
+                        can_be_clean = False
+                        break
+                if can_be_clean:
+                    clean_face = candidate
+                    break
+
+            # Select tabs, keeping clean_face free of tabs
+            used_vertices: Set[Tuple[float, float]] = set()
+            deduplicated = []
+
+            def get_edge_vertices(face_idx: int, edge_idx: int) -> List[Tuple[float, float]]:
+                p1, p2 = self._get_edge_endpoints(face_idx, edge_idx)
+                return [(round(p1[0], 1), round(p1[1], 1)),
+                        (round(p2[0], 1), round(p2[1], 1))]
+
+            def has_vertex_conflict(face_idx: int, edge_idx: int) -> bool:
+                verts = get_edge_vertices(face_idx, edge_idx)
+                return any(v in used_vertices for v in verts)
+
+            # Process edges in a consistent order
+            for edge_3d in sorted(edge_to_faces.keys()):
+                occurrences = edge_to_faces[edge_3d]
+                if len(occurrences) == 1:
+                    chosen = occurrences[0]
+                else:
+                    # Filter out clean_face if possible
+                    not_clean = [o for o in occurrences if o[0] != clean_face]
+                    candidates = not_clean if not_clean else occurrences
+
+                    # Among candidates, prefer those without vertex conflicts
+                    no_conflict = [o for o in candidates if not has_vertex_conflict(*o)]
+                    if len(no_conflict) >= 1:
+                        chosen = min(no_conflict, key=lambda x: (x[0], x[1]))
+                    else:
+                        chosen = min(candidates, key=lambda x: (x[0], x[1]))
+
+                deduplicated.append(chosen)
+                # Mark vertices as used
+                for v in get_edge_vertices(*chosen):
+                    used_vertices.add(v)
+
+            # Sort by face_idx for consistent ordering
+            deduplicated.sort(key=lambda x: (x[0], x[1]))
+            return deduplicated
+
+        # Fallback: return all free edges (no deduplication)
         return free_edges
 
     def compute_tab_vertices(self, face_idx: int, edge_idx: int,

@@ -132,7 +132,8 @@ def main():
     # 4. Create unfolder
     print("4. Computing 2D pattern layout (5-10-5)...")
     margin = 0.0 if args.no_margin else 0.1
-    unfolder = IcosahedronUnfolder(edge_length=args.scale, margin=margin)
+    unfolder = IcosahedronUnfolder(edge_length=args.scale, margin=margin,
+                                    face_indices=icosahedron.face_indices)
 
     # 5. Download and process country data
     countries_by_face = None
