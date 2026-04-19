@@ -51,6 +51,9 @@ class FaceAssignment:
         Returns:
             Face index (0-19)
         """
+        # Apply coordinate rotation for pole_on_face mode
+        lat, lon = self.icosahedron.rotate_latlon(lat, lon)
+
         point_3d = self.icosahedron.latlon_to_cartesian(lat, lon)
 
         # Find nearest face center (dot product comparison)
@@ -68,6 +71,9 @@ class FaceAssignment:
         Returns:
             Array of face indices
         """
+        # Apply coordinate rotation for pole_on_face mode
+        lats, lons = self.icosahedron.rotate_latlon_arrays(lats, lons)
+
         # Convert to cartesian
         lat_rad = np.radians(lats)
         lon_rad = np.radians(lons)

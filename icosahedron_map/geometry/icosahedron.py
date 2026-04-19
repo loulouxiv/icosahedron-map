@@ -17,17 +17,33 @@ class Icosahedron:
     """
     Regular icosahedron inscribed in a unit sphere, oriented with
     the north pole (90°N) on a vertex.
+
+    Supports an optional coordinate rotation to effectively place the
+    north pole at the center of a face instead.
     """
 
     # Golden ratio
     PHI = (1 + np.sqrt(5)) / 2
 
-    def __init__(self):
-        """Initialize icosahedron with vertices and faces."""
+    def __init__(self, pole_on_face: bool = False):
+        """
+        Initialize icosahedron with vertices and faces.
+
+        Args:
+            pole_on_face: If True, apply a coordinate rotation so that
+                          geographic north pole maps to a face center.
+        """
+        self.pole_on_face = pole_on_face
         self.vertices = self._compute_vertices()
         self.face_indices = self._define_face_indices()
         self.faces = self._compute_faces()
         self.face_centers = self._compute_face_centers()
+
+        # Compute rotation matrix for pole_on_face mode
+        if pole_on_face:
+            self._coord_rotation = self._compute_pole_on_face_rotation()
+        else:
+            self._coord_rotation = None
 
     def _compute_vertices(self) -> np.ndarray:
         """
@@ -59,7 +75,7 @@ class Icosahedron:
         norms = np.linalg.norm(raw_vertices, axis=1, keepdims=True)
         vertices = raw_vertices / norms
 
-        # Find the vertex with highest z (closest to north pole)
+        # Standard orientation: vertex at north pole
         north_idx = np.argmax(vertices[:, 2])
         north_vertex = vertices[north_idx]
 
@@ -68,6 +84,23 @@ class Icosahedron:
         vertices = (rotation @ vertices.T).T
 
         return vertices
+
+    def _compute_pole_on_face_rotation(self) -> np.ndarray:
+        """
+        Compute rotation matrix that maps geographic coordinates so that
+        the north pole (0,0,1) maps to a face center of the icosahedron.
+
+        This is the INVERSE of rotating a face center to the north pole.
+        """
+        # Find the face center with highest z (closest to north pole)
+        north_face_idx = np.argmax(self.face_centers[:, 2])
+        face_center = self.face_centers[north_face_idx]
+
+        # We want: rotation @ (0,0,1) = face_center
+        # This is the inverse of rotating face_center to (0,0,1)
+        rotation_to_pole = self._rotation_to_north_pole(face_center)
+        # Inverse of rotation matrix is its transpose
+        return rotation_to_pole.T
 
     def _rotation_to_north_pole(self, vertex: np.ndarray) -> np.ndarray:
         """
@@ -218,6 +251,63 @@ class Icosahedron:
         y = np.cos(lat_rad) * np.sin(lon_rad)
         z = np.sin(lat_rad)
         return np.array([x, y, z])
+
+    def rotate_latlon(self, lat: float, lon: float) -> Tuple[float, float]:
+        """
+        Apply coordinate rotation for pole_on_face mode.
+
+        In pole_on_face mode, rotates coordinates so that the geographic
+        north pole maps to a face center of the icosahedron.
+
+        Args:
+            lat: Latitude in degrees
+            lon: Longitude in degrees
+
+        Returns:
+            (rotated_lat, rotated_lon) in degrees
+        """
+        if self._coord_rotation is None:
+            return lat, lon
+
+        # Convert to cartesian
+        cart = self.latlon_to_cartesian(lat, lon)
+
+        # Apply rotation
+        rotated = self._coord_rotation @ cart
+
+        # Convert back to lat/lon
+        return self.vertex_to_latlon(rotated)
+
+    def rotate_latlon_arrays(self, lats: np.ndarray, lons: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Apply coordinate rotation to arrays of coordinates.
+
+        Args:
+            lats: Array of latitudes in degrees
+            lons: Array of longitudes in degrees
+
+        Returns:
+            (rotated_lats, rotated_lons) as arrays in degrees
+        """
+        if self._coord_rotation is None:
+            return lats, lons
+
+        # Convert to cartesian
+        lat_rad = np.radians(lats)
+        lon_rad = np.radians(lons)
+        x = np.cos(lat_rad) * np.cos(lon_rad)
+        y = np.cos(lat_rad) * np.sin(lon_rad)
+        z = np.sin(lat_rad)
+
+        # Stack and rotate
+        cart = np.stack([x, y, z], axis=0)  # 3 x N
+        rotated = self._coord_rotation @ cart  # 3 x N
+
+        # Convert back to lat/lon
+        rotated_lats = np.degrees(np.arcsin(np.clip(rotated[2], -1, 1)))
+        rotated_lons = np.degrees(np.arctan2(rotated[1], rotated[0]))
+
+        return rotated_lats, rotated_lons
 
     def get_face_latlon_center(self, face_idx: int) -> Tuple[float, float]:
         """Get the center of a face in lat/lon coordinates."""

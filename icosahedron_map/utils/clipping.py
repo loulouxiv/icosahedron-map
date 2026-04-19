@@ -30,6 +30,7 @@ class SphericalClipper:
         """
         self.face_assignment = face_assignment
         self.face_projections = face_projections
+        self.icosahedron = face_assignment.icosahedron
 
         # Build clip polygons for each face
         self.clip_polygons = self._build_clip_polygons()
@@ -121,6 +122,27 @@ class SphericalClipper:
 
         return transform(shift_coords, geometry)
 
+    def _rotate_geometry(self, geometry):
+        """
+        Apply coordinate rotation for pole_on_face mode.
+
+        Rotates all coordinates in the geometry using the icosahedron's
+        coordinate rotation matrix.
+        """
+        if self.icosahedron._coord_rotation is None:
+            return geometry
+
+        from shapely.ops import transform
+
+        def rotate_coords(x, y):
+            x = np.array(x)
+            y = np.array(y)
+            # x is longitude, y is latitude
+            rotated_lats, rotated_lons = self.icosahedron.rotate_latlon_arrays(y, x)
+            return rotated_lons, rotated_lats
+
+        return transform(rotate_coords, geometry)
+
     def clip_geometry_to_face(self, geometry, face_idx: int):
         """
         Clip a geometry to a specific face.
@@ -137,9 +159,12 @@ class SphericalClipper:
         if clip_poly.is_empty:
             return None
 
+        # Apply coordinate rotation for pole_on_face mode
+        rotated_geometry = self._rotate_geometry(geometry)
+
         # Shift geometry to match clip polygon's coordinate system
         center_lon = self.face_projections[face_idx].center_lon
-        shifted_geometry = self._shift_geometry_lon(geometry, center_lon)
+        shifted_geometry = self._shift_geometry_lon(rotated_geometry, center_lon)
 
         try:
             clipped = shifted_geometry.intersection(clip_poly)

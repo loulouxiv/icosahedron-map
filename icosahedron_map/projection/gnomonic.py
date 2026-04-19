@@ -70,7 +70,7 @@ class FaceProjection:
         # North polar faces (0-4): point UP in pattern, need y-flip
         # Equatorial faces 5,7,9,11,13: point DOWN in pattern, need x-flip
         # Equatorial faces 6,8,10,12,14: point UP in pattern, need y-flip
-        # South polar faces (15-19): point DOWN in pattern, no flip needed
+        # South polar faces (15-19): point DOWN in pattern, need x-flip
         if self.face_idx < 5:
             # North polar - flip y
             self.flip_x = False
@@ -97,17 +97,23 @@ class FaceProjection:
         if self.flip_y:
             self.proj_vertices[:, 1] *= -1
 
-    def project(self, lat: float, lon: float) -> Tuple[float, float]:
+    def project(self, lat: float, lon: float, already_rotated: bool = False) -> Tuple[float, float]:
         """
         Project a point from lat/lon to normalized face coordinates.
 
         Args:
             lat: Latitude in degrees
             lon: Longitude in degrees
+            already_rotated: If True, skip the pole_on_face coordinate rotation
+                            (for coordinates that were already rotated, e.g. clipped geometries)
 
         Returns:
             (x, y) in normalized face coordinates (centered, scaled)
         """
+        # Apply coordinate rotation for pole_on_face mode
+        if not already_rotated:
+            lat, lon = self.icosahedron.rotate_latlon(lat, lon)
+
         # Project using pyproj
         x, y = self.to_gnom.transform(lon, lat)
 
@@ -134,6 +140,9 @@ class FaceProjection:
         Returns:
             (x_array, y_array) in normalized face coordinates
         """
+        # Apply coordinate rotation for pole_on_face mode
+        lats, lons = self.icosahedron.rotate_latlon_arrays(lats, lons)
+
         x, y = self.to_gnom.transform(lons, lats)
 
         x = (x - self.proj_centroid[0]) * self.scale

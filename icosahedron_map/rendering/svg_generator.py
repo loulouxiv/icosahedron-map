@@ -94,6 +94,18 @@ class IcosahedronSVGGenerator:
                 stroke: #c44;
                 stroke-width: 0.3;
             }
+            .polar-circle {
+                fill: none;
+                stroke: #4488cc;
+                stroke-width: 0.3;
+                stroke-dasharray: 4,2;
+            }
+            .tropic {
+                fill: none;
+                stroke: #cc8844;
+                stroke-width: 0.3;
+                stroke-dasharray: 4,2;
+            }
             .face-label {
                 font-family: Arial, sans-serif;
                 font-size: 6px;
@@ -157,7 +169,8 @@ class IcosahedronSVGGenerator:
             )
             self.face_outlines_group.add(triangle)
 
-    def draw_country(self, face_idx: int, geometry, name: str = ""):
+    def draw_country(self, face_idx: int, geometry, name: str = "",
+                     already_rotated: bool = False):
         """
         Draw a country polygon on a face.
 
@@ -165,16 +178,18 @@ class IcosahedronSVGGenerator:
             face_idx: Face index
             geometry: Shapely geometry (Polygon or MultiPolygon)
             name: Country name for data attribute
+            already_rotated: If True, geometry coordinates are already in
+                            icosahedron space (rotated for pole_on_face mode)
         """
         color = self.country_colors.get(name)
         if isinstance(geometry, MultiPolygon):
             for poly in geometry.geoms:
-                self._draw_single_polygon(face_idx, poly, name, color)
+                self._draw_single_polygon(face_idx, poly, name, color, already_rotated)
         elif isinstance(geometry, Polygon):
-            self._draw_single_polygon(face_idx, geometry, name, color)
+            self._draw_single_polygon(face_idx, geometry, name, color, already_rotated)
 
     def _draw_single_polygon(self, face_idx: int, polygon: Polygon, name: str,
-                              color: str = None):
+                              color: str = None, already_rotated: bool = False):
         """Draw a single polygon."""
         face_proj = self.face_projections[face_idx]
 
@@ -182,7 +197,7 @@ class IcosahedronSVGGenerator:
         exterior_points = []
         for lon, lat in polygon.exterior.coords:
             try:
-                local_x, local_y = face_proj.project(lat, lon)
+                local_x, local_y = face_proj.project(lat, lon, already_rotated=already_rotated)
                 x, y = self.unfolder.transform_point(face_idx, local_x, local_y)
                 exterior_points.append((x, y))
             except Exception:
@@ -197,7 +212,7 @@ class IcosahedronSVGGenerator:
             hole_points = []
             for lon, lat in interior.coords:
                 try:
-                    local_x, local_y = face_proj.project(lat, lon)
+                    local_x, local_y = face_proj.project(lat, lon, already_rotated=already_rotated)
                     x, y = self.unfolder.transform_point(face_idx, local_x, local_y)
                     hole_points.append((x, y))
                 except Exception:
@@ -274,6 +289,37 @@ class IcosahedronSVGGenerator:
 
         for segment in meridians:
             self.draw_graticule_line(face_idx, segment)
+
+    def draw_special_parallels(self, face_idx: int, special_parallels: dict):
+        """
+        Draw special parallels (polar circles and tropics) for a face.
+
+        Args:
+            face_idx: Face index
+            special_parallels: Dict with keys like 'arctic_circle', 'tropic_of_cancer',
+                              etc., each containing a list of line segments
+        """
+        for name, segments in special_parallels.items():
+            if 'circle' in name:
+                css_class = 'polar-circle'
+            else:
+                css_class = 'tropic'
+
+            for segment in segments:
+                if len(segment) < 2:
+                    continue
+
+                # Transform points to pattern coordinates
+                pattern_points = []
+                for local_x, local_y in segment:
+                    x, y = self.unfolder.transform_point(face_idx, local_x, local_y)
+                    pattern_points.append((x, y))
+
+                polyline = self.dwg.polyline(
+                    points=pattern_points,
+                    class_=css_class
+                )
+                self.graticule_group.add(polyline)
 
     def add_face_labels(self):
         """Add face number labels."""

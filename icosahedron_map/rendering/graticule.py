@@ -188,3 +188,156 @@ class EquatorHighlighter:
             segments.append(segment)
 
         return segments
+
+
+class SpecialParallelsGenerator:
+    """
+    Generates special latitude lines: polar circles and tropics.
+
+    Special latitudes:
+    - Arctic Circle: ~66.56°N (90° - obliquity)
+    - Tropic of Cancer: ~23.44°N (obliquity)
+    - Tropic of Capricorn: ~23.44°S (-obliquity)
+    - Antarctic Circle: ~66.56°S (-90° + obliquity)
+    """
+
+    # Earth's axial tilt (obliquity) in degrees
+    OBLIQUITY = 23.436
+
+    # Named latitudes
+    ARCTIC_CIRCLE = 90.0 - OBLIQUITY      # ~66.564°N
+    TROPIC_OF_CANCER = OBLIQUITY           # ~23.436°N
+    TROPIC_OF_CAPRICORN = -OBLIQUITY       # ~23.436°S
+    ANTARCTIC_CIRCLE = -90.0 + OBLIQUITY  # ~66.564°S
+
+    def __init__(self):
+        """Initialize the special parallels generator."""
+        self.special_latitudes = {
+            'arctic_circle': self.ARCTIC_CIRCLE,
+            'tropic_of_cancer': self.TROPIC_OF_CANCER,
+            'tropic_of_capricorn': self.TROPIC_OF_CAPRICORN,
+            'antarctic_circle': self.ANTARCTIC_CIRCLE
+        }
+
+    def generate_parallel_at_latitude(
+            self,
+            latitude: float,
+            face_proj: FaceProjection,
+            face_assignment: FaceAssignment,
+            face_idx: int
+    ) -> List[List[Tuple[float, float]]]:
+        """
+        Generate a parallel line at a specific latitude for a face.
+
+        Args:
+            latitude: Latitude in degrees
+            face_proj: FaceProjection for this face
+            face_assignment: FaceAssignment instance
+            face_idx: Face index
+
+        Returns:
+            List of line segments
+        """
+        segments = []
+        lons = np.linspace(-180, 180, 721)
+        segment = []
+
+        for lon in lons:
+            assigned_face = face_assignment.assign_point(latitude, lon)
+            if assigned_face != face_idx:
+                if segment and len(segment) >= 2:
+                    segments.append(segment)
+                segment = []
+                continue
+
+            try:
+                x, y = face_proj.project(latitude, lon)
+                if abs(x) < 10 and abs(y) < 10:
+                    segment.append((x, y))
+            except Exception:
+                if segment and len(segment) >= 2:
+                    segments.append(segment)
+                segment = []
+
+        if len(segment) >= 2:
+            segments.append(segment)
+
+        return segments
+
+    def generate_polar_circles(
+            self,
+            face_proj: FaceProjection,
+            face_assignment: FaceAssignment,
+            face_idx: int
+    ) -> dict:
+        """
+        Generate Arctic and Antarctic circles for a face.
+
+        Args:
+            face_proj: FaceProjection for this face
+            face_assignment: FaceAssignment instance
+            face_idx: Face index
+
+        Returns:
+            Dict with 'arctic_circle' and 'antarctic_circle' keys,
+            each containing a list of line segments
+        """
+        return {
+            'arctic_circle': self.generate_parallel_at_latitude(
+                self.ARCTIC_CIRCLE, face_proj, face_assignment, face_idx
+            ),
+            'antarctic_circle': self.generate_parallel_at_latitude(
+                self.ANTARCTIC_CIRCLE, face_proj, face_assignment, face_idx
+            )
+        }
+
+    def generate_tropics(
+            self,
+            face_proj: FaceProjection,
+            face_assignment: FaceAssignment,
+            face_idx: int
+    ) -> dict:
+        """
+        Generate Tropic of Cancer and Tropic of Capricorn for a face.
+
+        Args:
+            face_proj: FaceProjection for this face
+            face_assignment: FaceAssignment instance
+            face_idx: Face index
+
+        Returns:
+            Dict with 'tropic_of_cancer' and 'tropic_of_capricorn' keys,
+            each containing a list of line segments
+        """
+        return {
+            'tropic_of_cancer': self.generate_parallel_at_latitude(
+                self.TROPIC_OF_CANCER, face_proj, face_assignment, face_idx
+            ),
+            'tropic_of_capricorn': self.generate_parallel_at_latitude(
+                self.TROPIC_OF_CAPRICORN, face_proj, face_assignment, face_idx
+            )
+        }
+
+    def generate_all(
+            self,
+            face_proj: FaceProjection,
+            face_assignment: FaceAssignment,
+            face_idx: int
+    ) -> dict:
+        """
+        Generate all special parallels (polar circles and tropics) for a face.
+
+        Args:
+            face_proj: FaceProjection for this face
+            face_assignment: FaceAssignment instance
+            face_idx: Face index
+
+        Returns:
+            Dict with keys for each special parallel, containing line segments
+        """
+        result = {}
+        for name, latitude in self.special_latitudes.items():
+            result[name] = self.generate_parallel_at_latitude(
+                latitude, face_proj, face_assignment, face_idx
+            )
+        return result

@@ -15,7 +15,7 @@ from .projection.face_assignment import FaceAssignment
 from .data.downloader import NaturalEarthDownloader
 from .utils.clipping import SphericalClipper
 from .utils.coloring import assign_country_colors
-from .rendering.graticule import GraticuleGenerator
+from .rendering.graticule import GraticuleGenerator, SpecialParallelsGenerator
 from .rendering.svg_generator import IcosahedronSVGGenerator
 from .rendering.pdf_generator import svg_to_pdf
 
@@ -107,6 +107,16 @@ def main():
         metavar='FRACTION',
         help="Tab height as fraction of edge length (default: 0.15)"
     )
+    parser.add_argument(
+        '--pole-on-face',
+        action='store_true',
+        help="Position north pole at center of a face instead of on a vertex"
+    )
+    parser.add_argument(
+        '--special-parallels',
+        action='store_true',
+        help="Show polar circles (Arctic/Antarctic) and tropics (Cancer/Capricorn)"
+    )
 
     args = parser.parse_args()
 
@@ -114,12 +124,16 @@ def main():
 
     # 1. Build icosahedron
     print("1. Building icosahedron geometry...")
-    icosahedron = Icosahedron()
+    icosahedron = Icosahedron(pole_on_face=args.pole_on_face)
 
     # Print some info about the orientation
-    north_vertex = icosahedron.vertices[0]  # Should be at north pole
-    lat, lon = icosahedron.vertex_to_latlon(north_vertex)
-    print(f"   North pole vertex at: ({lat:.1f}N, {lon:.1f}E)")
+    if args.pole_on_face:
+        print("   Orientation: North pole mapped to face center")
+    else:
+        north_vertex = icosahedron.vertices[0]  # Should be at north pole
+        lat, lon = icosahedron.vertex_to_latlon(north_vertex)
+        print(f"   Orientation: North pole on vertex")
+        print(f"   North pole vertex at: ({lat:.1f}N, {lon:.1f}E)")
 
     # 2. Create projections for each face
     print("2. Setting up gnomonic projections for 20 faces...")
@@ -196,7 +210,8 @@ def main():
         print("   Drawing countries...")
         for face_idx, gdf in countries_by_face.items():
             for _, row in gdf.iterrows():
-                svg_gen.draw_country(face_idx, row.geometry, row.get('name', ''))
+                svg_gen.draw_country(face_idx, row.geometry, row.get('name', ''),
+                                    already_rotated=args.pole_on_face)
 
     # Draw graticule
     if not args.no_graticule:
@@ -207,6 +222,16 @@ def main():
                 face_proj, face_assignment, face_idx
             )
             svg_gen.draw_graticule(face_idx, parallels, meridians)
+
+    # Draw special parallels (polar circles and tropics)
+    if args.special_parallels:
+        print("   Drawing polar circles and tropics...")
+        special_gen = SpecialParallelsGenerator()
+        for face_idx, face_proj in enumerate(face_projections):
+            special_parallels = special_gen.generate_all(
+                face_proj, face_assignment, face_idx
+            )
+            svg_gen.draw_special_parallels(face_idx, special_parallels)
 
     # Draw face outlines
     svg_gen.draw_face_outlines()
