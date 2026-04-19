@@ -192,9 +192,10 @@ class EquatorHighlighter:
 
 class SpecialParallelsGenerator:
     """
-    Generates special latitude lines: polar circles and tropics.
+    Generates special latitude lines: equator, polar circles, and tropics.
 
     Special latitudes:
+    - Equator: 0°
     - Arctic Circle: ~66.56°N (90° - obliquity)
     - Tropic of Cancer: ~23.44°N (obliquity)
     - Tropic of Capricorn: ~23.44°S (-obliquity)
@@ -205,6 +206,7 @@ class SpecialParallelsGenerator:
     OBLIQUITY = 23.436
 
     # Named latitudes
+    EQUATOR = 0.0                          # 0°
     ARCTIC_CIRCLE = 90.0 - OBLIQUITY      # ~66.564°N
     TROPIC_OF_CANCER = OBLIQUITY           # ~23.436°N
     TROPIC_OF_CAPRICORN = -OBLIQUITY       # ~23.436°S
@@ -213,6 +215,7 @@ class SpecialParallelsGenerator:
     def __init__(self):
         """Initialize the special parallels generator."""
         self.special_latitudes = {
+            'equator': self.EQUATOR,
             'arctic_circle': self.ARCTIC_CIRCLE,
             'tropic_of_cancer': self.TROPIC_OF_CANCER,
             'tropic_of_capricorn': self.TROPIC_OF_CAPRICORN,

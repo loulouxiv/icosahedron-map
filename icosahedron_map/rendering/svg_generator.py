@@ -292,15 +292,17 @@ class IcosahedronSVGGenerator:
 
     def draw_special_parallels(self, face_idx: int, special_parallels: dict):
         """
-        Draw special parallels (polar circles and tropics) for a face.
+        Draw special parallels (equator, polar circles, and tropics) for a face.
 
         Args:
             face_idx: Face index
-            special_parallels: Dict with keys like 'arctic_circle', 'tropic_of_cancer',
-                              etc., each containing a list of line segments
+            special_parallels: Dict with keys like 'equator', 'arctic_circle',
+                              'tropic_of_cancer', etc., each containing a list of line segments
         """
         for name, segments in special_parallels.items():
-            if 'circle' in name:
+            if name == 'equator':
+                css_class = 'equator'
+            elif 'circle' in name:
                 css_class = 'polar-circle'
             else:
                 css_class = 'tropic'

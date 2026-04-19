@@ -115,7 +115,7 @@ def main():
     parser.add_argument(
         '--special-parallels',
         action='store_true',
-        help="Show polar circles (Arctic/Antarctic) and tropics (Cancer/Capricorn)"
+        help="Show equator, polar circles (Arctic/Antarctic), and tropics (Cancer/Capricorn)"
     )
 
     args = parser.parse_args()
