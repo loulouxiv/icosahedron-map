@@ -18,6 +18,9 @@ A4_HEIGHT_PT = 841.89  # 297mm
 A4_WIDTH_MM = 210
 A4_HEIGHT_MM = 297
 
+# Convert points to pixels for cairosvg (96 DPI = 96 pixels per inch = 96/72 pixels per point)
+PT_TO_PX = 96.0 / 72.0
+
 
 def _parse_svg_dimensions(svg_string: str) -> tuple:
     """Extract viewBox dimensions from SVG."""
@@ -257,11 +260,13 @@ def svg_to_pdf(svg_string: str, output_path: str, landscape: bool = True,
         svg_string = re.sub(r'height="[^"]+"', f'height="{new_vb_height}px"', svg_string)
 
     # Convert SVG to PDF at full page size
+    # cairosvg expects dimensions in pixels, not points
+    # 96 DPI = 96 pixels per inch = 96/72 pixels per point
     cairosvg.svg2pdf(
         bytestring=svg_string.encode('utf-8'),
         write_to=output_path,
-        output_width=page_width,
-        output_height=page_height,
+        output_width=page_width * PT_TO_PX,
+        output_height=page_height * PT_TO_PX,
     )
     print(f"PDF saved to: {output_path}")
 
