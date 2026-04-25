@@ -17,7 +17,7 @@ from .utils.clipping import SphericalClipper
 from .utils.coloring import assign_country_colors
 from .rendering.graticule import GraticuleGenerator, SpecialParallelsGenerator
 from .rendering.svg_generator import IcosahedronSVGGenerator
-from .rendering.pdf_generator import svg_to_pdf
+from .rendering.pdf_generator import svg_to_pdf, generate_multipage_pdf
 
 
 def main():
@@ -117,6 +117,11 @@ def main():
         action='store_true',
         help="Show equator, polar circles (Arctic/Antarctic), and tropics (Cancer/Capricorn)"
     )
+    parser.add_argument(
+        '--separate-pages',
+        action='store_true',
+        help="Print each face on a separate PDF page at maximum size"
+    )
 
     args = parser.parse_args()
 
@@ -146,8 +151,10 @@ def main():
     # 4. Create unfolder
     print("4. Computing 2D pattern layout (5-10-5)...")
     margin = 0.0 if args.no_margin else 0.1
+    face_spacing = 2.0 if args.separate_pages else 0.0
     unfolder = IcosahedronUnfolder(edge_length=args.scale, margin=margin,
-                                    face_indices=icosahedron.face_indices)
+                                    face_indices=icosahedron.face_indices,
+                                    face_spacing=face_spacing)
 
     # 5. Download and process country data
     countries_by_face = None
@@ -201,9 +208,11 @@ def main():
     svg_gen.draw_face_backgrounds()
 
     # Draw gluing tabs (if enabled)
-    if args.tabs:
+    if args.tabs and not args.separate_pages:
         print("   Drawing gluing tabs...")
         svg_gen.draw_gluing_tabs(tab_size=args.tab_size)
+    elif args.tabs and args.separate_pages:
+        print("   Warning: --tabs ignored when using --separate-pages")
 
     # Draw countries
     if countries_by_face:
@@ -243,8 +252,16 @@ def main():
     # Save
     if args.pdf:
         svg_string = svg_gen.get_svg_string()
-        svg_to_pdf(svg_string, output_path, landscape=True, oblique=args.oblique,
-                   no_margin=args.no_margin, margin_mm=args.margin_mm, unfolder=unfolder)
+        if args.separate_pages:
+            generate_multipage_pdf(
+                svg_string=svg_string,
+                output_path=output_path,
+                unfolder=unfolder,
+                margin_mm=args.margin_mm
+            )
+        else:
+            svg_to_pdf(svg_string, output_path, landscape=True, oblique=args.oblique,
+                       no_margin=args.no_margin, margin_mm=args.margin_mm, unfolder=unfolder)
     else:
         svg_gen.save()
 

@@ -17,7 +17,8 @@ class IcosahedronUnfolder:
     """
 
     def __init__(self, edge_length: float = 100.0, margin: float = 0.1,
-                 face_indices: List[Tuple[int, int, int]] = None):
+                 face_indices: List[Tuple[int, int, int]] = None,
+                 face_spacing: float = 0.0):
         """
         Initialize the unfolder.
 
@@ -26,11 +27,13 @@ class IcosahedronUnfolder:
             margin: Margin as fraction of edge_length. Use 0.0 for no margin.
             face_indices: Optional list of (v0, v1, v2) vertex indices for each
                          face from the 3D icosahedron. Required for tab deduplication.
+            face_spacing: Spacing multiplier between faces (0.0 = normal, 2.0 = 2x spacing).
         """
         self.edge_length = edge_length
         self.margin = margin
         self.triangle_height = edge_length * np.sqrt(3) / 2
         self.face_indices = face_indices
+        self.face_spacing = face_spacing
 
         # Compute face positions in the 2D pattern
         self.face_positions = self._compute_face_positions()
@@ -50,12 +53,13 @@ class IcosahedronUnfolder:
         positions = {}
         e = self.edge_length
         h = self.triangle_height
+        spacing_mult = 1.0 + self.face_spacing
 
         # Row 1: 5 triangles pointing UP (faces 0-4, north polar)
         # Base at y=h, apex at y=0
         for i in range(5):
-            x = (i + 0.5) * e
-            y = 2 * h / 3  # Center is 2/3 from apex towards base
+            x = (i + 0.5) * e * spacing_mult
+            y = (2 * h / 3) * spacing_mult  # Center is 2/3 from apex towards base
             positions[i] = (np.array([x, y]), 0)
 
         # Row 2: 10 triangles alternating (faces 5-14, equatorial)
@@ -65,22 +69,22 @@ class IcosahedronUnfolder:
             if i % 2 == 0:
                 # Triangles pointing DOWN (indices 5,7,9,11,13 -> i=0,2,4,6,8)
                 # These share base with row 1 triangles
-                x = (i // 2 + 0.5) * e
-                y = h + h / 3  # Center is 1/3 from base
+                x = (i // 2 + 0.5) * e * spacing_mult
+                y = (h + h / 3) * spacing_mult  # Center is 1/3 from base
                 rotation = 180
             else:
                 # Triangles pointing UP (indices 6,8,10,12,14 -> i=1,3,5,7,9)
                 # These are offset by e/2
-                x = (i // 2 + 1) * e
-                y = h + 2 * h / 3  # Center is 2/3 from apex
+                x = (i // 2 + 1) * e * spacing_mult
+                y = (h + 2 * h / 3) * spacing_mult  # Center is 2/3 from apex
                 rotation = 0
             positions[5 + i] = (np.array([x, y]), rotation)
 
         # Row 3: 5 triangles pointing DOWN (faces 15-19, south polar)
         # These connect to the UP triangles of row 2
         for i in range(5):
-            x = (i + 1) * e  # Offset by e/2 from row 1
-            y = 2 * h + h / 3
+            x = (i + 1) * e * spacing_mult  # Offset by e/2 from row 1
+            y = (2 * h + h / 3) * spacing_mult
             positions[15 + i] = (np.array([x, y]), 180)
 
         return positions

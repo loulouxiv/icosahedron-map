@@ -5,7 +5,7 @@ Clips country polygons to the Voronoi region of each face.
 """
 
 import numpy as np
-from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
+from shapely.geometry import Polygon, MultiPolygon, GeometryCollection, box
 from shapely.ops import unary_union
 from typing import Dict, List, Optional
 import geopandas as gpd
@@ -58,14 +58,15 @@ class SphericalClipper:
 
             # Convert to (lon, lat) for Shapely, handling antimeridian and poles
             center_lon = self.face_projections[face_idx].center_lon
+
             coords = []
             for lat, lon in boundary:
                 # At poles, longitude is undefined - use face center's longitude
                 if abs(lat) > 89.9:
                     lon = center_lon
                 else:
-                    # Normalize longitude relative to face center to avoid antimeridian issues
-                    # Shift lon to be within ±180° of center_lon
+                    # Normalize longitude relative to face center
+                    # This keeps coordinates continuous even across the antimeridian
                     while lon - center_lon > 180:
                         lon -= 360
                     while lon - center_lon < -180:
@@ -108,14 +109,14 @@ class SphericalClipper:
         """
         Shift geometry longitudes to be centered around center_lon.
 
-        This handles antimeridian crossing by ensuring all coordinates
-        are within ±180° of the center longitude.
+        Uses standard ±180° normalization relative to center.
         """
         from shapely.ops import transform
 
         def shift_coords(x, y):
-            x = np.array(x)
-            # Shift to be within ±180° of center
+            x = np.array(x, dtype=float)
+            # Standard normalization relative to center
+            # Use > for positive boundary (exact boundary handled by fallback)
             x = np.where(x - center_lon > 180, x - 360, x)
             x = np.where(x - center_lon < -180, x + 360, x)
             return x, y
@@ -166,6 +167,11 @@ class SphericalClipper:
         center_lon = self.face_projections[face_idx].center_lon
         shifted_geometry = self._shift_geometry_lon(rotated_geometry, center_lon)
 
+        # If shifted geometry is invalid, use fallback which splits at boundary
+        if not shifted_geometry.is_valid:
+            result = self._clip_geometry_fallback(rotated_geometry, clip_poly, center_lon)
+            return self._fill_polar_gaps(result, clip_poly) if result else None
+
         try:
             clipped = shifted_geometry.intersection(clip_poly)
 
@@ -174,23 +180,164 @@ class SphericalClipper:
 
             # Filter out non-polygonal results
             if isinstance(clipped, (Polygon, MultiPolygon)):
-                return clipped
+                return self._fill_polar_gaps(clipped, clip_poly)
             elif isinstance(clipped, GeometryCollection):
                 polys = [g for g in clipped.geoms
                         if isinstance(g, (Polygon, MultiPolygon))]
                 if polys:
-                    return unary_union(polys)
+                    return self._fill_polar_gaps(unary_union(polys), clip_poly)
                 return None
             return None
 
         except Exception:
-            # Try with buffer(0) fix
+            # The shifted geometry may be invalid (self-intersecting) for
+            # polygons that span wide longitude ranges. Try processing
+            # each part of a MultiPolygon separately.
+            result = self._clip_geometry_fallback(rotated_geometry, clip_poly, center_lon)
+            return self._fill_polar_gaps(result, clip_poly) if result else None
+
+    def _fill_polar_gaps(self, geometry, clip_poly, pole_lat: float = -90.0,
+                          threshold: float = 5.0):
+        """
+        Fill triangular gaps at the poles by extending geometry to clip polygon boundary.
+
+        Currently disabled - just returns geometry unchanged.
+        """
+        return geometry
+
+    def _split_at_shift_boundary(self, geometry, center_lon: float):
+        """
+        Split geometry at the longitude where shifting creates a discontinuity.
+
+        The discontinuity occurs at center_lon + 180° (or center_lon - 180°).
+        Splitting here ensures each piece shifts continuously.
+        """
+        # The shift boundary is where lon - center_lon = 180 (or -180)
+        # i.e., at lon = center_lon + 180
+        boundary_lon = center_lon + 180
+        if boundary_lon > 180:
+            boundary_lon -= 360
+        elif boundary_lon < -180:
+            boundary_lon += 360
+
+        # Check if geometry crosses this boundary
+        minx, miny, maxx, maxy = geometry.bounds
+
+        # Normalize bounds relative to boundary_lon
+        crosses_boundary = False
+        if boundary_lon > 0:
+            # Boundary is in eastern hemisphere
+            # Geometry crosses if it spans across boundary_lon
+            if minx < boundary_lon < maxx:
+                crosses_boundary = True
+        else:
+            # Boundary is in western hemisphere
+            if minx < boundary_lon < maxx:
+                crosses_boundary = True
+
+        # Also check if geometry wraps around (spans most of globe)
+        if maxx - minx > 180:
+            crosses_boundary = True
+
+        if not crosses_boundary:
+            return geometry
+
+        # Split into two parts: east and west of boundary
+        # Use boxes that cover each hemisphere relative to boundary
+        # Add tiny overlap (epsilon) to prevent gaps at the boundary
+        epsilon = 1e-6
+        west_box = box(boundary_lon - 360, -90, boundary_lon + epsilon, 90)
+        east_box = box(boundary_lon - epsilon, -90, boundary_lon + 360, 90)
+
+        try:
+            west_part = geometry.intersection(west_box)
+            east_part = geometry.intersection(east_box)
+
+            parts = []
+            if not west_part.is_empty:
+                parts.append(west_part)
+            if not east_part.is_empty:
+                parts.append(east_part)
+
+            if len(parts) == 0:
+                return geometry
+            elif len(parts) == 1:
+                return parts[0]
+            else:
+                # Return as MultiPolygon or GeometryCollection
+                return GeometryCollection(parts)
+        except Exception:
+            return geometry
+
+    def _shift_geometry_unconditional(self, geometry, shift_amount: float):
+        """
+        Shift all geometry coordinates by a fixed amount.
+        Used for parts that are entirely on one side of the shift boundary.
+        """
+        from shapely.ops import transform
+
+        def shift_coords(x, y):
+            x = np.array(x, dtype=float)
+            return x + shift_amount, y
+
+        return transform(shift_coords, geometry)
+
+    def _clip_geometry_fallback(self, geometry, clip_poly, center_lon: float):
+        """
+        Fallback clipping that splits geometry at shift boundary first.
+        """
+        # Split the geometry at the shift boundary
+        split_geom = self._split_at_shift_boundary(geometry, center_lon)
+
+        # Process all parts
+        parts_to_process = []
+        if isinstance(split_geom, (MultiPolygon, GeometryCollection)):
+            for part in split_geom.geoms:
+                if isinstance(part, (Polygon, MultiPolygon)):
+                    parts_to_process.append(part)
+                elif isinstance(part, GeometryCollection):
+                    for subpart in part.geoms:
+                        if isinstance(subpart, (Polygon, MultiPolygon)):
+                            parts_to_process.append(subpart)
+        elif isinstance(split_geom, Polygon):
+            parts_to_process.append(split_geom)
+
+        results = []
+        for part in parts_to_process:
             try:
-                fixed_geom = geometry.buffer(0)
-                fixed_clip = clip_poly.buffer(0)
-                return fixed_geom.intersection(fixed_clip)
+                # Determine the correct shift for this part based on its position
+                # relative to center_lon. The target range is [center_lon-180, center_lon+180].
+                minx, _, maxx, _ = part.bounds
+
+                # Check if part needs shifting and in which direction
+                # Use the centroid to determine which side of center this part is on
+                cx = (minx + maxx) / 2
+
+                if cx - center_lon > 180:
+                    # Part is too far east, shift down by 360
+                    shifted_part = self._shift_geometry_unconditional(part, -360)
+                elif cx - center_lon < -180:
+                    # Part is too far west, shift up by 360
+                    shifted_part = self._shift_geometry_unconditional(part, +360)
+                else:
+                    # Part is already in the correct range
+                    shifted_part = part
+
+                if shifted_part.is_valid:
+                    clipped = shifted_part.intersection(clip_poly)
+                    if not clipped.is_empty:
+                        if isinstance(clipped, (Polygon, MultiPolygon)):
+                            results.append(clipped)
+                        elif isinstance(clipped, GeometryCollection):
+                            for g in clipped.geoms:
+                                if isinstance(g, (Polygon, MultiPolygon)):
+                                    results.append(g)
             except Exception:
-                return None
+                continue
+
+        if results:
+            return unary_union(results)
+        return None
 
     def clip_all_countries(self, gdf: gpd.GeoDataFrame) -> Dict[int, gpd.GeoDataFrame]:
         """

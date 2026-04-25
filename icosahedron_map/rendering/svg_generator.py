@@ -36,6 +36,7 @@ class IcosahedronSVGGenerator:
         self.face_projections = face_projections
         self.output_path = output_path
         self.country_colors = country_colors or {}
+        self._face_triangles: Dict[int, Polygon] = {}  # Cache for 2D clip triangles
 
         # Get pattern bounds (tabs are intentionally excluded - they spill outside)
         min_x, min_y, width, height = unfolder.get_pattern_bounds()
@@ -169,6 +170,71 @@ class IcosahedronSVGGenerator:
             )
             self.face_outlines_group.add(triangle)
 
+    def _get_face_triangle(self, face_idx: int) -> Polygon:
+        """Get the 2D triangle polygon for a face (for clipping)."""
+        if face_idx not in self._face_triangles:
+            vertices = self.unfolder.get_triangle_vertices(face_idx)
+            self._face_triangles[face_idx] = Polygon(vertices)
+        return self._face_triangles[face_idx]
+
+    def _extend_to_polar_apex(self, polygon: Polygon, face_idx: int,
+                               face_triangle: Polygon) -> Polygon:
+        """
+        Extend a polygon to the triangle apex if it's near the pole.
+
+        This fixes triangular gaps at the south pole for faces 15-19.
+        """
+        from shapely.ops import unary_union
+
+        # Get triangle vertices - apex is vertex 0 for all faces
+        vertices = self.unfolder.get_triangle_vertices(face_idx)
+        apex = vertices[0]
+
+        # Check if polygon reaches near the apex (within 10% of triangle height)
+        triangle_height = abs(vertices[0][1] - vertices[1][1])
+        threshold = triangle_height * 0.1
+
+        # Get polygon bounds
+        minx, miny, maxx, maxy = polygon.bounds
+
+        # For southern faces, apex is at max y
+        dist_to_apex = abs(maxy - apex[1])
+
+        if dist_to_apex > threshold:
+            # Polygon not near apex, return unchanged
+            return polygon
+
+        # Create a small triangle from the polygon's top edge to the apex
+        # Find points on the polygon closest to the apex
+        top_points = []
+        for x, y in polygon.exterior.coords:
+            if abs(y - maxy) < threshold:
+                top_points.append((x, y))
+
+        if len(top_points) < 2:
+            return polygon
+
+        # Get leftmost and rightmost top points
+        top_points.sort(key=lambda p: p[0])
+        left_top = top_points[0]
+        right_top = top_points[-1]
+
+        # Create fill triangle from left_top to apex to right_top
+        fill_triangle = Polygon([left_top, apex, right_top])
+
+        if not fill_triangle.is_valid or fill_triangle.area < 0.01:
+            return polygon
+
+        # Union the polygon with the fill triangle
+        try:
+            extended = unary_union([polygon, fill_triangle])
+            if extended.is_valid:
+                return extended
+        except Exception:
+            pass
+
+        return polygon
+
     def draw_country(self, face_idx: int, geometry, name: str = "",
                      already_rotated: bool = False):
         """
@@ -220,9 +286,58 @@ class IcosahedronSVGGenerator:
             if len(hole_points) >= 3:
                 holes.append(hole_points)
 
-        # Create SVG element
+        # Clip projected polygon against face triangle to prevent spilling
+        try:
+            face_triangle = self._get_face_triangle(face_idx)
+            if holes:
+                projected_poly = Polygon(exterior_points, holes)
+            else:
+                projected_poly = Polygon(exterior_points)
+
+            if not projected_poly.is_valid:
+                projected_poly = projected_poly.buffer(0)
+
+            # For southern faces (15-19), fill polar gaps by extending to apex
+            if face_idx >= 15:
+                projected_poly = self._extend_to_polar_apex(
+                    projected_poly, face_idx, face_triangle
+                )
+
+            clipped = projected_poly.intersection(face_triangle)
+
+            if clipped.is_empty:
+                return
+
+            # Draw clipped result (may be Polygon or MultiPolygon)
+            self._draw_clipped_geometry(clipped, color)
+        except Exception:
+            # Fallback: draw without clipping
+            self._draw_polygon_element(exterior_points, holes, color)
+
+    def _draw_clipped_geometry(self, geometry, color: str = None):
+        """Draw a clipped geometry (Polygon or MultiPolygon)."""
+        from shapely.geometry import GeometryCollection
+
+        if isinstance(geometry, Polygon):
+            if geometry.is_empty:
+                return
+            exterior = list(geometry.exterior.coords)
+            holes = [list(interior.coords) for interior in geometry.interiors]
+            self._draw_polygon_element(exterior, holes, color)
+        elif isinstance(geometry, MultiPolygon):
+            for poly in geometry.geoms:
+                self._draw_clipped_geometry(poly, color)
+        elif isinstance(geometry, GeometryCollection):
+            for geom in geometry.geoms:
+                if isinstance(geom, (Polygon, MultiPolygon)):
+                    self._draw_clipped_geometry(geom, color)
+
+    def _draw_polygon_element(self, exterior_points: List, holes: List, color: str = None):
+        """Draw a polygon SVG element."""
+        if len(exterior_points) < 3:
+            return
+
         if holes:
-            # Use path for polygons with holes
             d = self._points_to_path_d(exterior_points, holes)
             if color:
                 path = self.dwg.path(d=d, class_="country", style=f"fill:{color}")

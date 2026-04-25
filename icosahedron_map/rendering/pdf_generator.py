@@ -8,7 +8,18 @@ import re
 import math
 import cairosvg
 import numpy as np
+import tempfile
+import os
 from ..geometry.unfold import IcosahedronUnfolder
+
+# Try to import pypdf, fall back to PyPDF2 if necessary
+try:
+    import pypdf
+except ImportError:
+    try:
+        import PyPDF2 as pypdf
+    except ImportError:
+        pypdf = None
 
 # A4 dimensions in points (72 points per inch)
 A4_WIDTH_PT = 595.28  # 210mm
@@ -285,3 +296,133 @@ def svg_file_to_pdf(svg_path: str, output_path: str, landscape: bool = True,
     with open(svg_path, 'r', encoding='utf-8') as f:
         svg_string = f.read()
     svg_to_pdf(svg_string, output_path, landscape, oblique)
+
+
+def get_face_bounds(unfolder: IcosahedronUnfolder, face_idx: int) -> tuple:
+    """
+    Get bounding box for a single face with minimal padding to prevent edge clipping.
+
+    Args:
+        unfolder: IcosahedronUnfolder instance
+        face_idx: Face index (0-19)
+
+    Returns:
+        (min_x, min_y, width, height) of face bounding box
+    """
+    vertices = unfolder.get_triangle_vertices(face_idx)
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+
+    # Tiny padding to prevent edge content from being clipped
+    # (stroke widths, anti-aliasing, etc.)
+    epsilon = unfolder.edge_length * 0.005
+    min_x = min(xs) - epsilon
+    max_x = max(xs) + epsilon
+    min_y = min(ys) - epsilon
+    max_y = max(ys) + epsilon
+
+    return (min_x, min_y, max_x - min_x, max_y - min_y)
+
+
+def generate_multipage_pdf(svg_string: str, output_path: str,
+                           unfolder: IcosahedronUnfolder,
+                           margin_mm: float = 0) -> None:
+    """
+    Generate 20-page PDF with one face per page at maximum size.
+
+    Args:
+        svg_string: Full SVG string with all faces (spaced out)
+        output_path: Output PDF file path
+        unfolder: IcosahedronUnfolder instance (with face_spacing applied)
+        margin_mm: Margin size in millimeters
+    """
+    if pypdf is None:
+        raise ImportError(
+            "pypdf is required for multi-page PDF generation. "
+            "Install it with: pip install pypdf"
+        )
+
+    # Use landscape A4 for maximum triangle size
+    page_w_mm = A4_HEIGHT_MM  # 297mm
+    page_h_mm = A4_WIDTH_MM   # 210mm
+    page_width = A4_HEIGHT_PT
+    page_height = A4_WIDTH_PT
+
+    # Create temporary directory for individual PDFs
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_pdfs = []
+
+        # Generate PDF for each face
+        for face_idx in range(20):
+            print(f"   Generating page {face_idx + 1}/20...")
+
+            # Get face bounds
+            face_min_x, face_min_y, face_w, face_h = get_face_bounds(unfolder, face_idx)
+
+            # Calculate aspect ratios
+            page_ar = page_w_mm / page_h_mm
+            face_ar = face_w / face_h
+
+            # Create viewBox with page aspect ratio that contains the face
+            # This ensures the content fills the page without distortion
+            if face_ar > page_ar:
+                # Face is wider relative to page - width constrained
+                vb_width = face_w
+                vb_height = face_w / page_ar
+            else:
+                # Face is taller relative to page - height constrained
+                vb_height = face_h
+                vb_width = face_h * page_ar
+
+            # Account for margins by expanding viewBox
+            # The face should fill only the available area, not the full page
+            if margin_mm > 0:
+                available_w = page_w_mm - 2 * margin_mm
+                available_h = page_h_mm - 2 * margin_mm
+                # Expand viewBox so face fills available area instead of full page
+                margin_scale = page_w_mm / available_w
+                vb_width *= margin_scale
+                vb_height *= margin_scale
+
+            # Center viewBox on face
+            new_min_x = (face_min_x + face_w / 2) - vb_width / 2
+            new_min_y = (face_min_y + face_h / 2) - vb_height / 2
+
+            # Update SVG viewBox to focus on this face
+            face_svg = re.sub(
+                r'viewBox="[^"]+"',
+                f'viewBox="{new_min_x} {new_min_y} {vb_width} {vb_height}"',
+                svg_string
+            )
+            face_svg = re.sub(
+                r'width="[^"]+"',
+                f'width="{vb_width}px"',
+                face_svg
+            )
+            face_svg = re.sub(
+                r'height="[^"]+"',
+                f'height="{vb_height}px"',
+                face_svg
+            )
+
+            # Generate PDF for this face
+            temp_pdf_path = os.path.join(temp_dir, f"face_{face_idx:02d}.pdf")
+            cairosvg.svg2pdf(
+                bytestring=face_svg.encode('utf-8'),
+                write_to=temp_pdf_path,
+                output_width=page_width * PT_TO_PX,
+                output_height=page_height * PT_TO_PX,
+            )
+            temp_pdfs.append(temp_pdf_path)
+
+        # Merge all PDFs
+        print("   Merging pages...")
+        merger = pypdf.PdfWriter()
+        for pdf_path in temp_pdfs:
+            merger.append(pdf_path)
+
+        # Write final PDF
+        merger.write(output_path)
+        merger.close()
+
+    print(f"PDF saved to: {output_path}")
