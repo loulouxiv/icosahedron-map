@@ -116,7 +116,6 @@ class SphericalClipper:
         def shift_coords(x, y):
             x = np.array(x, dtype=float)
             # Standard normalization relative to center
-            # Use > for positive boundary (exact boundary handled by fallback)
             x = np.where(x - center_lon > 180, x - 360, x)
             x = np.where(x - center_lon < -180, x + 360, x)
             return x, y
@@ -169,6 +168,18 @@ class SphericalClipper:
 
         # Check if we're in rotated mode (pole_on_face)
         is_rotated = self.icosahedron._coord_rotation is not None
+
+        # Check if shifted geometry was incorrectly stretched by straddling shift boundary
+        # This happens when a small polygon straddles center_lon ± 180 and gets
+        # some points shifted while others don't, creating a huge invalid polygon
+        orig_minx, _, orig_maxx, _ = rotated_geometry.bounds
+        orig_width = orig_maxx - orig_minx
+        shift_minx, _, shift_maxx, _ = shifted_geometry.bounds
+        shift_width = shift_maxx - shift_minx
+
+        # If width increased dramatically (more than 180° increase), it's invalid
+        if shift_width - orig_width > 180:
+            return None
 
         try:
             clipped = shifted_geometry.intersection(clip_poly)
