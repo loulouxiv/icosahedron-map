@@ -167,10 +167,8 @@ class SphericalClipper:
         center_lon = self.face_projections[face_idx].center_lon
         shifted_geometry = self._shift_geometry_lon(rotated_geometry, center_lon)
 
-        # If shifted geometry is invalid, use fallback which splits at boundary
-        if not shifted_geometry.is_valid:
-            result = self._clip_geometry_fallback(rotated_geometry, clip_poly, center_lon)
-            return self._fill_polar_gaps(result, clip_poly) if result else None
+        # Check if we're in rotated mode (pole_on_face)
+        is_rotated = self.icosahedron._coord_rotation is not None
 
         try:
             clipped = shifted_geometry.intersection(clip_poly)
@@ -191,10 +189,41 @@ class SphericalClipper:
 
         except Exception:
             # The shifted geometry may be invalid (self-intersecting) for
-            # polygons that span wide longitude ranges. Try processing
-            # each part of a MultiPolygon separately.
-            result = self._clip_geometry_fallback(rotated_geometry, clip_poly, center_lon)
+            # polygons that span wide longitude ranges.
+            if is_rotated:
+                # For rotated mode, use simple buffer fix on rotated geometry
+                result = self._clip_simple_fallback(rotated_geometry, clip_poly, center_lon)
+            else:
+                # For normal mode, use split-at-boundary fallback
+                result = self._clip_geometry_fallback(rotated_geometry, clip_poly, center_lon)
             return self._fill_polar_gaps(result, clip_poly) if result else None
+
+    def _clip_simple_fallback(self, geometry, clip_poly, center_lon: float):
+        """
+        Simple fallback using buffer(0) to fix invalid geometries.
+
+        Used for rotated coordinate mode where split-at-boundary doesn't apply.
+        """
+        try:
+            # Fix geometry with buffer(0), then shift and clip
+            fixed_geom = geometry.buffer(0)
+            if not fixed_geom.is_valid:
+                return None
+            shifted_geom = self._shift_geometry_lon(fixed_geom, center_lon)
+            fixed_clip = clip_poly.buffer(0)
+            result = shifted_geom.intersection(fixed_clip)
+            if result.is_empty:
+                return None
+            if isinstance(result, (Polygon, MultiPolygon)):
+                return result
+            elif isinstance(result, GeometryCollection):
+                polys = [g for g in result.geoms
+                        if isinstance(g, (Polygon, MultiPolygon))]
+                if polys:
+                    return unary_union(polys)
+            return None
+        except Exception:
+            return None
 
     def _fill_polar_gaps(self, geometry, clip_poly, pole_lat: float = -90.0,
                           threshold: float = 5.0):
