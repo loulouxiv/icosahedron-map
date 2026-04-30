@@ -113,6 +113,13 @@ def main():
         help="Position north pole at center of a face instead of on a vertex"
     )
     parser.add_argument(
+        '--rotate-lon',
+        type=float,
+        default=0.0,
+        metavar='DEGREES',
+        help="Rotate map around north-south axis by given angle in degrees"
+    )
+    parser.add_argument(
         '--special-parallels',
         action='store_true',
         help="Show equator, polar circles (Arctic/Antarctic), and tropics (Cancer/Capricorn)"
@@ -129,7 +136,10 @@ def main():
 
     # 1. Build icosahedron
     print("1. Building icosahedron geometry...")
-    icosahedron = Icosahedron(pole_on_face=args.pole_on_face)
+    icosahedron = Icosahedron(
+        pole_on_face=args.pole_on_face,
+        longitude_rotation=args.rotate_lon
+    )
 
     # Print some info about the orientation
     if args.pole_on_face:
@@ -139,6 +149,8 @@ def main():
         lat, lon = icosahedron.vertex_to_latlon(north_vertex)
         print(f"   Orientation: North pole on vertex")
         print(f"   North pole vertex at: ({lat:.1f}N, {lon:.1f}E)")
+    if args.rotate_lon != 0:
+        print(f"   Longitude rotation: {args.rotate_lon}°")
 
     # 2. Create projections for each face
     print("2. Setting up gnomonic projections for 20 faces...")
@@ -217,10 +229,12 @@ def main():
     # Draw countries
     if countries_by_face:
         print("   Drawing countries...")
+        # Countries are already rotated during clipping if any rotation is applied
+        is_rotated = icosahedron._coord_rotation is not None
         for face_idx, gdf in countries_by_face.items():
             for _, row in gdf.iterrows():
                 svg_gen.draw_country(face_idx, row.geometry, row.get('name', ''),
-                                    already_rotated=args.pole_on_face)
+                                    already_rotated=is_rotated)
 
     # Draw graticule
     if not args.no_graticule:

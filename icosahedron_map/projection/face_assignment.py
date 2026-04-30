@@ -105,8 +105,20 @@ class FaceAssignment:
         region = self.voronoi.regions[face_idx]
         vertices = self.voronoi.vertices[region]
 
-        boundary = []
+        # Remove duplicate vertices (scipy SphericalVoronoi sometimes produces
+        # near-identical vertices at the same location)
+        unique_vertices = []
         for v in vertices:
+            is_duplicate = False
+            for uv in unique_vertices:
+                if np.linalg.norm(v - uv) < 1e-6:
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                unique_vertices.append(v)
+
+        boundary = []
+        for v in unique_vertices:
             lat, lon = self.icosahedron.vertex_to_latlon(v)
             boundary.append((lat, lon))
 

@@ -122,9 +122,378 @@ class SphericalClipper:
 
         return transform(shift_coords, geometry)
 
+    def _split_polar_geometry_at_meridians(self, geometry):
+        """
+        Split polar-spanning geometries into narrow slices before rotation.
+
+        This is ONLY needed for longitude (Z-axis) rotation, not for pole-on-face
+        rotation. Pole-on-face rotation tilts the entire coordinate system in 3D,
+        so the "critical longitude" concept doesn't apply.
+
+        For longitude rotation: geometries that span near the poles and also span
+        wide longitude ranges can become self-intersecting after rotation. We split
+        at meridians that account for the rotation angle to ensure no slice crosses
+        the post-rotation antimeridian.
+        """
+        # Only apply this splitting for longitude rotation, not pole-on-face
+        rotation = self.icosahedron.longitude_rotation
+        if rotation == 0.0:
+            # No longitude rotation - skip splitting
+            # (pole_on_face alone doesn't need this splitting)
+            return geometry
+
+        minx, miny, maxx, maxy = geometry.bounds
+
+        # Only process if geometry reaches near a pole AND spans wide longitudes
+        is_polar = miny < -80 or maxy > 80
+        is_wide = maxx - minx > 90  # Spans more than 1/4 of the globe
+
+        if not is_polar or not is_wide:
+            return geometry
+
+        # Calculate the critical longitude that becomes ±180 after rotation
+        # For rotation by angle θ, original lon = -180 - θ becomes rotated lon = -180
+        critical_lon = -180 - rotation  # This longitude maps to -180 after rotation
+        while critical_lon > 180:
+            critical_lon -= 360
+        while critical_lon < -180:
+            critical_lon += 360
+
+        # Use narrow 30° slices for better control
+        slice_width = 30
+        num_slices = 12
+
+        # Create slices that AVOID having the critical longitude on a boundary
+        # Points exactly at critical_lon map to ±180 which causes coordinate discontinuity
+        # By offsetting the slice boundaries slightly, we keep critical_lon inside a slice
+        epsilon = 0.5  # Half-degree offset
+        slice_starts = []
+
+        for i in range(num_slices):
+            lon = critical_lon + epsilon + i * slice_width
+            while lon > 180:
+                lon -= 360
+            while lon < -180:
+                lon += 360
+            slice_starts.append(lon)
+        slice_starts.sort()
+
+        # Create slices
+        slices = []
+        for i in range(len(slice_starts)):
+            lon1 = slice_starts[i]
+            lon2 = slice_starts[(i + 1) % len(slice_starts)]
+
+            if lon2 < lon1:
+                # Slice crosses -180/180 boundary
+                # Split into two pieces
+                slices.append(box(lon1, -90, 180, 90))
+                slices.append(box(-180, -90, lon2, 90))
+            else:
+                slices.append(box(lon1, -90, lon2, 90))
+
+        parts = []
+        try:
+            for slc in slices:
+                part = geometry.intersection(slc)
+                if part.is_empty:
+                    continue
+                if isinstance(part, (Polygon, MultiPolygon)):
+                    if isinstance(part, MultiPolygon):
+                        parts.extend(part.geoms)
+                    else:
+                        parts.append(part)
+                elif hasattr(part, 'geoms'):
+                    for g in part.geoms:
+                        if isinstance(g, Polygon):
+                            parts.append(g)
+
+            if len(parts) == 0:
+                return geometry
+            elif len(parts) == 1:
+                return parts[0]
+            else:
+                return MultiPolygon(parts)
+        except Exception:
+            return geometry
+
+    def _split_invalid_at_antimeridian(self, geometry):
+        """
+        Split invalid geometries at the antimeridian.
+
+        If a geometry is invalid due to coordinates wrapping around the
+        antimeridian, split it into eastern and western parts.
+        """
+        minx, miny, maxx, maxy = geometry.bounds
+        width = maxx - minx
+
+        # For valid geometries, only split if very wide
+        if geometry.is_valid and width < 300:
+            return geometry
+
+        # For invalid geometries, try buffer(0) fix first
+        if not geometry.is_valid:
+            try:
+                fixed = geometry.buffer(0)
+                if fixed.is_valid and not fixed.is_empty:
+                    # Check if buffer(0) destroyed too much area
+                    if isinstance(fixed, (Polygon, MultiPolygon)):
+                        new_minx, new_miny, new_maxx, new_maxy = fixed.bounds
+                        new_width = new_maxx - new_minx
+                        # If it's now narrower and valid, use it
+                        if new_width < width:
+                            return fixed
+            except Exception:
+                pass
+
+        # Only try splitting if geometry spans nearly the whole globe
+        if width < 300:
+            if not geometry.is_valid:
+                # Last resort: try buffer(0)
+                try:
+                    return geometry.buffer(0)
+                except Exception:
+                    pass
+            return geometry
+
+        # First try: shift all coordinates to one side of antimeridian
+        fixed = self._try_shift_to_hemisphere(geometry)
+        if fixed is not None and fixed.is_valid:
+            return fixed
+
+        # Second try: fix with buffer(0) then split
+        work_geom = geometry
+        if not geometry.is_valid:
+            try:
+                work_geom = geometry.buffer(0)
+                if work_geom.is_empty:
+                    return geometry
+            except Exception:
+                return geometry
+
+        # Split at the antimeridian
+        west_box = box(-180, -90, 0, 90)
+        east_box = box(0, -90, 180, 90)
+
+        try:
+            west_part = work_geom.intersection(west_box)
+            east_part = work_geom.intersection(east_box)
+
+            parts = []
+            for part in [west_part, east_part]:
+                if part.is_empty:
+                    continue
+                if isinstance(part, Polygon):
+                    parts.append(part)
+                elif isinstance(part, MultiPolygon):
+                    parts.extend(part.geoms)
+                elif hasattr(part, 'geoms'):
+                    for g in part.geoms:
+                        if isinstance(g, Polygon):
+                            parts.append(g)
+
+            if len(parts) == 0:
+                return work_geom if work_geom.is_valid else geometry
+            elif len(parts) == 1:
+                return parts[0]
+            else:
+                return MultiPolygon(parts)
+        except Exception:
+            return work_geom if work_geom.is_valid else geometry
+
+    def _try_shift_to_hemisphere(self, geometry):
+        """
+        Try to fix a geometry that falsely spans the globe by shifting coords.
+
+        When coordinates cluster near ±180, some might be at +179.9 and others
+        at -179.9 due to rotation precision. This makes the bounding box span
+        360° even though the actual geometry is small. We fix by shifting all
+        coordinates to one side.
+        """
+        from shapely.ops import transform
+
+        coords = list(geometry.exterior.coords)
+        lons = [c[0] for c in coords]
+
+        # Count how many coords are near each side of antimeridian
+        near_pos_180 = sum(1 for lon in lons if lon > 170)
+        near_neg_180 = sum(1 for lon in lons if lon < -170)
+
+        if near_pos_180 == 0 and near_neg_180 == 0:
+            return None  # Not an antimeridian issue
+
+        # Check if most coords are in one hemisphere
+        in_east = sum(1 for lon in lons if lon > 0)
+        in_west = sum(1 for lon in lons if lon < 0)
+
+        if in_east > in_west:
+            # Shift western outliers to eastern hemisphere
+            def shift_east(x, y):
+                x = np.array(x, dtype=float)
+                x = np.where(x < -90, x + 360, x)
+                return x, y
+            shifted = transform(shift_east, geometry)
+        else:
+            # Shift eastern outliers to western hemisphere
+            def shift_west(x, y):
+                x = np.array(x, dtype=float)
+                x = np.where(x > 90, x - 360, x)
+                return x, y
+            shifted = transform(shift_west, geometry)
+
+        return shifted
+
+    def _split_at_antimeridian_pre_rotation(self, geometry):
+        """
+        Split geometries that cross the antimeridian before any rotation.
+
+        Wide-spanning geometries that cross ±180 can become invalid after 3D
+        rotation because coordinates wrap around unexpectedly. Split them at
+        multiple meridians to create narrower pieces.
+        """
+        minx, miny, maxx, maxy = geometry.bounds
+        width = maxx - minx
+
+        # Only process wide geometries
+        if width < 270:
+            return geometry
+
+        # Split at the antimeridian only (0° and ±180° boundaries)
+        # More aggressive splitting can cause more issues with 3D rotation
+        slices = [
+            box(-180, -90, 0, 90),
+            box(0, -90, 180, 90),
+        ]
+
+        try:
+            parts = []
+            for slc in slices:
+                part = geometry.intersection(slc)
+                if part.is_empty:
+                    continue
+                if isinstance(part, Polygon):
+                    parts.append(part)
+                elif isinstance(part, MultiPolygon):
+                    parts.extend(part.geoms)
+                elif hasattr(part, 'geoms'):
+                    for g in part.geoms:
+                        if isinstance(g, Polygon):
+                            parts.append(g)
+
+            if len(parts) == 0:
+                return geometry
+            elif len(parts) == 1:
+                return parts[0]
+            else:
+                return MultiPolygon(parts)
+        except Exception:
+            return geometry
+
+    def _fix_post_rotation_spans(self, geometry):
+        """
+        Fix geometries that span too much longitude after rotation.
+
+        After 3D rotation, coordinates near the rotated pole can end up on
+        opposite sides of the antimeridian, creating bounding boxes that span
+        most of the globe. Fix by shifting all coordinates to the same hemisphere.
+        """
+        from shapely.ops import transform
+
+        if isinstance(geometry, MultiPolygon):
+            fixed_parts = []
+            for part in geometry.geoms:
+                fixed = self._fix_single_polygon_span(part)
+                if fixed is not None:
+                    if isinstance(fixed, MultiPolygon):
+                        fixed_parts.extend(fixed.geoms)
+                    elif isinstance(fixed, Polygon):
+                        fixed_parts.append(fixed)
+            if fixed_parts:
+                return MultiPolygon(fixed_parts)
+            return geometry
+        elif isinstance(geometry, Polygon):
+            fixed = self._fix_single_polygon_span(geometry)
+            return fixed if fixed is not None else geometry
+        return geometry
+
+    def _fix_single_polygon_span(self, polygon):
+        """Fix a single polygon that may span too much longitude."""
+        from shapely.ops import transform
+
+        if polygon.is_empty:
+            return polygon
+
+        # First, normalize all coordinates to -180 to 180 range
+        def normalize_lon(x, y):
+            x = np.array(x, dtype=float)
+            x = ((x + 180) % 360) - 180
+            return x, y
+
+        try:
+            polygon = transform(normalize_lon, polygon)
+        except Exception:
+            pass
+
+        minx, miny, maxx, maxy = polygon.bounds
+        width = maxx - minx
+
+        if width < 180:
+            return polygon
+
+        # Check if this is a "false span" - coordinates clustered near antimeridian
+        coords = list(polygon.exterior.coords)
+        lons = [c[0] for c in coords]
+
+        # Count coordinates in each region
+        near_pos_180 = sum(1 for lon in lons if lon > 120)
+        near_neg_180 = sum(1 for lon in lons if lon < -120)
+
+        if near_pos_180 > 0 and near_neg_180 > 0:
+            # Coordinates clustered near both +180 and -180
+            # Shift all to one side
+            if near_pos_180 > near_neg_180:
+                # Shift negative coords to positive (add 360 to negative coords)
+                def shift_pos(x, y):
+                    x = np.array(x, dtype=float)
+                    x = np.where(x < 0, x + 360, x)
+                    return x, y
+                shift_func = shift_pos
+            else:
+                # Shift positive coords to negative (subtract 360 from positive coords)
+                def shift_neg(x, y):
+                    x = np.array(x, dtype=float)
+                    x = np.where(x > 0, x - 360, x)
+                    return x, y
+                shift_func = shift_neg
+
+            try:
+                shifted = transform(shift_func, polygon)
+                # Check if shifting reduced the width
+                new_width = shifted.bounds[2] - shifted.bounds[0]
+                if new_width < width:
+                    # Check if valid or can be made valid
+                    if shifted.is_valid:
+                        return shifted
+                    fixed = shifted.buffer(0)
+                    if fixed.is_valid and not fixed.is_empty:
+                        return fixed
+            except Exception:
+                pass
+
+        # If shifting didn't help and polygon is invalid, try splitting at antimeridian
+        if not polygon.is_valid:
+            fixed = self._split_invalid_at_antimeridian(polygon)
+            return fixed
+
+        # If valid but too wide, also try splitting
+        if width > 270:
+            return self._split_invalid_at_antimeridian(polygon)
+
+        return polygon
+
     def _rotate_geometry(self, geometry):
         """
-        Apply coordinate rotation for pole_on_face mode.
+        Apply coordinate rotation for pole_on_face or longitude rotation mode.
 
         Rotates all coordinates in the geometry using the icosahedron's
         coordinate rotation matrix.
@@ -132,16 +501,68 @@ class SphericalClipper:
         if self.icosahedron._coord_rotation is None:
             return geometry
 
+        # Split wide-spanning geometries at antimeridian before any rotation
+        # This prevents invalid geometries after 3D rotation
+        geometry = self._split_at_antimeridian_pre_rotation(geometry)
+
+        # For longitude rotation only: split polar geometries into slices
+        # to prevent self-intersection at the post-rotation antimeridian
+        geometry = self._split_polar_geometry_at_meridians(geometry)
+
         from shapely.ops import transform
 
         def rotate_coords(x, y):
-            x = np.array(x)
-            y = np.array(y)
+            x = np.array(x, dtype=float)
+            y = np.array(y, dtype=float)
+
             # x is longitude, y is latitude
             rotated_lats, rotated_lons = self.icosahedron.rotate_latlon_arrays(y, x)
+
+            # Fix pole points: at lat = ±90, longitude is undefined
+            # After rotation, arctan2 assigns arbitrary lons to pole points
+            # We fix this by inheriting longitude from nearest non-pole neighbor
+            pole_mask = np.abs(rotated_lats) > 89.9
+
+            if np.any(pole_mask):
+                n = len(rotated_lons)
+                for i in np.where(pole_mask)[0]:
+                    # Find nearest non-pole neighbor
+                    for offset in range(1, n):
+                        prev_idx = (i - offset) % n
+                        next_idx = (i + offset) % n
+                        if not pole_mask[prev_idx]:
+                            rotated_lons[i] = rotated_lons[prev_idx]
+                            break
+                        if not pole_mask[next_idx]:
+                            rotated_lons[i] = rotated_lons[next_idx]
+                            break
+
             return rotated_lons, rotated_lats
 
-        return transform(rotate_coords, geometry)
+        rotated = transform(rotate_coords, geometry)
+
+        # Post-process: fix geometries that span too much longitude or are invalid
+        rotated = self._fix_post_rotation_spans(rotated)
+
+        # Handle any remaining invalid geometries
+        if isinstance(rotated, MultiPolygon):
+            fixed_parts = []
+            for part in rotated.geoms:
+                if part.is_valid:
+                    fixed_parts.append(part)
+                else:
+                    fixed = self._split_invalid_at_antimeridian(part)
+                    if isinstance(fixed, MultiPolygon):
+                        fixed_parts.extend(fixed.geoms)
+                    elif isinstance(fixed, Polygon):
+                        fixed_parts.append(fixed)
+            if fixed_parts:
+                return MultiPolygon(fixed_parts)
+            return rotated
+        elif isinstance(rotated, Polygon) and not rotated.is_valid:
+            return self._split_invalid_at_antimeridian(rotated)
+
+        return rotated
 
     def clip_geometry_to_face(self, geometry, face_idx: int):
         """
@@ -214,12 +635,25 @@ class SphericalClipper:
         Simple fallback using buffer(0) to fix invalid geometries.
 
         Used for rotated coordinate mode where split-at-boundary doesn't apply.
+        For wide-spanning polygons (>180°), uses split-at-boundary approach
+        WITHOUT buffer(0) since that destroys polar regions.
         """
         try:
-            # Fix geometry with buffer(0), then shift and clip
+            # Check width on ORIGINAL geometry before any fix attempt
+            # buffer(0) can destroy polar regions on wide invalid geometries
+            minx, _, maxx, _ = geometry.bounds
+            width = maxx - minx
+
+            if width > 180:
+                # For wide polygons, use split-at-boundary approach directly
+                # Don't use buffer(0) as it destroys the polar region
+                return self._clip_geometry_fallback(geometry, clip_poly, center_lon)
+
+            # For narrow polygons, use buffer(0) fix + simple shift
             fixed_geom = geometry.buffer(0)
             if not fixed_geom.is_valid:
                 return None
+
             shifted_geom = self._shift_geometry_lon(fixed_geom, center_lon)
             fixed_clip = clip_poly.buffer(0)
             result = shifted_geom.intersection(fixed_clip)

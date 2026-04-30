@@ -10,7 +10,7 @@ With north pole on vertex: 5 faces around north pole, 5 around south pole, 10 eq
 """
 
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 
 class Icosahedron:
@@ -25,25 +25,25 @@ class Icosahedron:
     # Golden ratio
     PHI = (1 + np.sqrt(5)) / 2
 
-    def __init__(self, pole_on_face: bool = False):
+    def __init__(self, pole_on_face: bool = False, longitude_rotation: float = 0.0):
         """
         Initialize icosahedron with vertices and faces.
 
         Args:
             pole_on_face: If True, apply a coordinate rotation so that
                           geographic north pole maps to a face center.
+            longitude_rotation: Rotation angle around north-south axis in degrees.
+                               Positive values rotate eastward.
         """
         self.pole_on_face = pole_on_face
+        self.longitude_rotation = longitude_rotation
         self.vertices = self._compute_vertices()
         self.face_indices = self._define_face_indices()
         self.faces = self._compute_faces()
         self.face_centers = self._compute_face_centers()
 
-        # Compute rotation matrix for pole_on_face mode
-        if pole_on_face:
-            self._coord_rotation = self._compute_pole_on_face_rotation()
-        else:
-            self._coord_rotation = None
+        # Compute combined rotation matrix
+        self._coord_rotation = self._compute_coord_rotation()
 
     def _compute_vertices(self) -> np.ndarray:
         """
@@ -101,6 +101,50 @@ class Icosahedron:
         rotation_to_pole = self._rotation_to_north_pole(face_center)
         # Inverse of rotation matrix is its transpose
         return rotation_to_pole.T
+
+    def _compute_z_rotation(self, angle_deg: float) -> np.ndarray:
+        """
+        Compute rotation matrix for rotation around Z-axis (north-south).
+
+        Args:
+            angle_deg: Rotation angle in degrees (positive = eastward)
+
+        Returns:
+            3x3 rotation matrix
+        """
+        theta = np.radians(angle_deg)
+        cos_t, sin_t = np.cos(theta), np.sin(theta)
+        return np.array([
+            [cos_t, -sin_t, 0],
+            [sin_t, cos_t, 0],
+            [0, 0, 1]
+        ])
+
+    def _compute_coord_rotation(self) -> Optional[np.ndarray]:
+        """
+        Compute combined coordinate rotation matrix.
+
+        Composes longitude rotation with pole_on_face rotation.
+        Returns None if no rotation is needed.
+        """
+        matrices = []
+
+        # Longitude rotation applied first (to input coordinates)
+        if self.longitude_rotation != 0.0:
+            matrices.append(self._compute_z_rotation(self.longitude_rotation))
+
+        # Pole-on-face rotation applied second
+        if self.pole_on_face:
+            matrices.append(self._compute_pole_on_face_rotation())
+
+        if not matrices:
+            return None
+        elif len(matrices) == 1:
+            return matrices[0]
+        else:
+            # Compose: R_combined = R_pole @ R_lon
+            # Applied right-to-left: first lon rotation, then pole rotation
+            return matrices[1] @ matrices[0]
 
     def _rotation_to_north_pole(self, vertex: np.ndarray) -> np.ndarray:
         """
