@@ -254,14 +254,33 @@ class IcosahedronSVGGenerator:
         elif isinstance(geometry, Polygon):
             self._draw_single_polygon(face_idx, geometry, name, color, already_rotated)
 
+    def _find_antimeridian_edges_in_polygon(self, polygon: Polygon) -> set:
+        """Find indices of edges along the antimeridian (±180°) in a polygon."""
+        antimeridian_edges = set()
+        coords = list(polygon.exterior.coords)
+        for i in range(len(coords) - 1):
+            lon1, lat1 = coords[i]
+            lon2, lat2 = coords[i + 1]
+            # Check if edge is along antimeridian (both points at ±180°)
+            # Use a slightly larger tolerance to catch edges shifted slightly
+            if abs(abs(lon1) - 180) < 0.5 and abs(abs(lon2) - 180) < 0.5:
+                antimeridian_edges.add(i)
+        return antimeridian_edges
+
     def _draw_single_polygon(self, face_idx: int, polygon: Polygon, name: str,
                               color: str = None, already_rotated: bool = False):
         """Draw a single polygon."""
         face_proj = self.face_projections[face_idx]
 
+        # Check for antimeridian edges in the original polygon (before projection)
+        # We'll use this to know if we need to check clipped polygons too
+        has_antimeridian = len(self._find_antimeridian_edges_in_polygon(polygon)) > 0
+
         # Transform exterior ring
         exterior_points = []
-        for lon, lat in polygon.exterior.coords:
+        orig_coords = list(polygon.exterior.coords)
+
+        for i, (lon, lat) in enumerate(orig_coords):
             try:
                 local_x, local_y = face_proj.project(lat, lon, already_rotated=already_rotated)
                 x, y = self.unfolder.transform_point(face_idx, local_x, local_y)
@@ -308,11 +327,133 @@ class IcosahedronSVGGenerator:
             if clipped.is_empty:
                 return
 
-            # Draw clipped result (may be Polygon or MultiPolygon)
-            self._draw_clipped_geometry(clipped, color)
+            # Draw clipped geometry, passing original polygon for antimeridian detection
+            self._draw_clipped_geometry_check_antimeridian(
+                clipped, color, polygon if has_antimeridian else None, face_proj,
+                face_idx, already_rotated
+            )
         except Exception:
             # Fallback: draw without clipping
             self._draw_polygon_element(exterior_points, holes, color)
+
+    def _draw_clipped_geometry_check_antimeridian(self, geometry, color: str,
+                                                   orig_polygon, face_proj, face_idx: int,
+                                                   already_rotated: bool):
+        """Draw clipped geometry, checking for antimeridian edges if needed."""
+        from shapely.geometry import GeometryCollection
+
+        if isinstance(geometry, Polygon):
+            if geometry.is_empty:
+                return
+            exterior = list(geometry.exterior.coords)
+            holes = [list(interior.coords) for interior in geometry.interiors]
+
+            if orig_polygon is not None:
+                # Check the clipped polygon's source coordinates for antimeridian edges
+                # We need to reverse-project to find lat/lon and check
+                self._draw_polygon_with_antimeridian_check(
+                    exterior, holes, color, face_proj, face_idx, already_rotated
+                )
+            else:
+                self._draw_polygon_element(exterior, holes, color)
+
+        elif isinstance(geometry, MultiPolygon):
+            for poly in geometry.geoms:
+                self._draw_clipped_geometry_check_antimeridian(
+                    poly, color, orig_polygon, face_proj, face_idx, already_rotated
+                )
+        elif isinstance(geometry, GeometryCollection):
+            for geom in geometry.geoms:
+                if isinstance(geom, (Polygon, MultiPolygon)):
+                    self._draw_clipped_geometry_check_antimeridian(
+                        geom, color, orig_polygon, face_proj, face_idx, already_rotated
+                    )
+
+    def _draw_polygon_with_antimeridian_check(self, exterior_points: List, holes: List,
+                                               color: str, face_proj, face_idx: int,
+                                               already_rotated: bool):
+        """Draw polygon, detecting and hiding antimeridian edges based on 2D positions."""
+        if len(exterior_points) < 3:
+            return
+
+        # For detecting antimeridian edges in 2D:
+        # Antimeridian edges will be nearly vertical lines at the edge of the face
+        # where the face boundary intersects the antimeridian.
+        # We detect edges where both points are very close together in x but span y.
+
+        # Get face triangle bounds
+        face_triangle = self._get_face_triangle(face_idx)
+        minx, miny, maxx, maxy = face_triangle.bounds
+
+        # Find edges that look like antimeridian seams:
+        # - Very vertical (small x difference, large y difference)
+        # - Since we already know this polygon has antimeridian edges,
+        #   vertical edges are likely the artificial seams
+        antimeridian_edge_indices = set()
+        edge_tolerance = (maxx - minx) * 0.05  # 5% of face width
+
+        for i in range(len(exterior_points) - 1):
+            x1, y1 = exterior_points[i]
+            x2, y2 = exterior_points[i + 1]
+
+            x_diff = abs(x2 - x1)
+            y_diff = abs(y2 - y1)
+
+            # Check if edge is nearly vertical (y_diff much larger than x_diff)
+            # and has significant length. Ratio of 3:1 or more indicates vertical seam.
+            if x_diff < edge_tolerance and y_diff > x_diff * 3 and y_diff > edge_tolerance:
+                antimeridian_edge_indices.add(i)
+
+        if not antimeridian_edge_indices:
+            # No antimeridian edges detected, draw normally
+            self._draw_polygon_element(exterior_points, holes, color)
+            return
+
+        # Draw fill without stroke
+        fill_color = color if color else "#c8d8c0"
+        fill_style = f"fill:{fill_color};stroke:none"
+
+        if holes:
+            d = self._points_to_path_d(exterior_points, holes)
+            path = self.dwg.path(d=d, class_="country", style=fill_style)
+        else:
+            path = self.dwg.polygon(points=exterior_points, class_="country", style=fill_style)
+        self.countries_group.add(path)
+
+        # Draw stroke segments, skipping antimeridian edges
+        stroke_segments = []
+        current_segment = [exterior_points[0]]
+
+        for i in range(len(exterior_points) - 1):
+            if i in antimeridian_edge_indices:
+                # End current segment before antimeridian edge
+                if len(current_segment) >= 2:
+                    stroke_segments.append(current_segment)
+                current_segment = [exterior_points[i + 1]]
+            else:
+                current_segment.append(exterior_points[i + 1])
+
+        # Handle closing edge
+        if len(current_segment) >= 2:
+            # Check if closing edge (last to first) is antimeridian
+            last_idx = len(exterior_points) - 2  # Last edge index
+            if last_idx not in antimeridian_edge_indices:
+                # Connect back to first point if first segment exists
+                if stroke_segments and len(stroke_segments[0]) > 0:
+                    # Merge with first segment if they connect
+                    current_segment.append(exterior_points[0])
+            stroke_segments.append(current_segment)
+
+        # Draw stroke segments
+        for segment in stroke_segments:
+            if len(segment) >= 2:
+                polyline = self.dwg.polyline(
+                    points=segment,
+                    fill="none",
+                    stroke="#666",
+                    stroke_width="0.2"
+                )
+                self.countries_group.add(polyline)
 
     def _draw_clipped_geometry(self, geometry, color: str = None):
         """Draw a clipped geometry (Polygon or MultiPolygon)."""

@@ -564,6 +564,31 @@ class SphericalClipper:
 
         return rotated
 
+    def _has_antimeridian_seam(self, geometry):
+        """
+        Check if geometry has edges along the antimeridian (±180°).
+
+        Returns True if the geometry has edges where both endpoints are at ±180° lon.
+        """
+        if isinstance(geometry, MultiPolygon):
+            for part in geometry.geoms:
+                if self._polygon_has_antimeridian_seam(part):
+                    return True
+            return False
+        elif isinstance(geometry, Polygon):
+            return self._polygon_has_antimeridian_seam(geometry)
+        return False
+
+    def _polygon_has_antimeridian_seam(self, polygon):
+        """Check if a single polygon has antimeridian seam edges."""
+        coords = list(polygon.exterior.coords)
+        for i in range(len(coords) - 1):
+            lon1, _ = coords[i]
+            lon2, _ = coords[i + 1]
+            if abs(abs(lon1) - 180) < 0.1 and abs(abs(lon2) - 180) < 0.1:
+                return True
+        return False
+
     def clip_geometry_to_face(self, geometry, face_idx: int):
         """
         Clip a geometry to a specific face.
